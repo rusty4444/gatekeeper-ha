@@ -3,22 +3,24 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import hmac
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-try:
-    import bcrypt
-except ImportError:
-    bcrypt = None  # Fallback handled in methods
+import bcrypt
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
-from .const import *
+from .const import (
+    BCRYPT_ROUNDS,
+    STORAGE_KEY,
+    STORAGE_VERSION,
+    TOKEN_BYTE_LENGTH,
+    TOKEN_ID_LENGTH,
+    TOKEN_SOURCE_MANUAL,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -31,7 +33,7 @@ class TokenManager:
     def __init__(self, hass: HomeAssistant) -> None:
         self.hass = hass
         self._store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
-        self._tokens: dict[str, dict[str, Any]] = {}  # token_id -> token data
+        self._tokens: dict[str, dict[str, Any]] = {}
         self._lock = asyncio.Lock()
 
     async def async_load(self) -> None:
@@ -51,16 +53,19 @@ class TokenManager:
     async def async_create_token(
         self,
         label: str = "Guest",
-        duration_hours: int = 24,
+        duration_hours: float = 24,
         scoped_entities: list[str] | None = None,
         scoped_domains: list[str] | None = None,
         allowed_services: list[str] | None = None,
         max_uses: int = 0,
+        show_wifi: bool = False,
+        source: str = TOKEN_SOURCE_MANUAL,
     ) -> dict[str, Any]:
         """Create a new guest token.
 
-        Returns a dict with token info plus the one-time ``_secret`` and ``guest_url``.
-        Neither ``_secret`` nor ``guest_url`` is persisted in storage.
+        Returns the full safe-token dict plus the one-time ``_secret`` and a
+        path-only ``guest_url``. The hash is never returned; the secret is
+        returned exactly once and never persisted.
         """
         if scoped_entities is None:
             scoped_entities = ["light.*"]
@@ -71,7 +76,9 @@ class TokenManager:
         token_secret = secrets.token_urlsafe(TOKEN_BYTE_LENGTH)
         token_hash = self._hash_secret(token_secret)
 
-        expires_at = (datetime.now(timezone.utc) + timedelta(hours=duration_hours)).isoformat()
+        expires_at = (
+            datetime.now(timezone.utc) + timedelta(hours=duration_hours)
+        ).isoformat()
 
         token: dict[str, Any] = {
             "token_id": token_id,
@@ -85,22 +92,23 @@ class TokenManager:
             "scoped_entities": scoped_entities,
             "scoped_domains": scoped_domains,
             "allowed_services": allowed_services or [],
+            "show_wifi": bool(show_wifi),
+            "source": source,
         }
 
         async with self._lock:
             self._tokens[token_id] = token
             await self._async_save()
 
-        _LOGGER.info("Created token '%s' (ID: %s) expiring at %s", label, token_id, expires_at)
+        _LOGGER.info(
+            "Created token '%s' (ID: %s, source: %s) expiring at %s",
+            label, token_id, source, expires_at,
+        )
 
-        # Return guest_url and secret as top-level keys, NOT inside the stored token dict
-        return {
-            "token_id": token_id,
-            "_secret": token_secret,
-            "guest_url": self._build_guest_url(token_id, token_secret),
-            "expires_at": expires_at,
-            "label": label,
-        }
+        safe = self._safe_token(token)
+        safe["_secret"] = token_secret
+        safe["guest_url"] = self._build_guest_url(token_id, token_secret)
+        return safe
 
     async def async_revoke_token(self, token_id: str) -> bool:
         """Revoke a token by ID."""
@@ -114,14 +122,22 @@ class TokenManager:
         _LOGGER.info("Revoked token: %s ('%s')", token_id, token.get("label", ""))
         return True
 
-    async def async_revoke_all(self) -> int:
-        """Revoke all active tokens. Returns count revoked."""
+    async def async_revoke_all(self, source: str | None = None) -> int:
+        """Revoke active tokens.
+
+        When ``source`` is provided, only tokens with a matching ``source``
+        field are revoked. When ``source`` is None, all active tokens are
+        revoked (used by manual/admin actions only).
+        """
         count = 0
         async with self._lock:
             for token in self._tokens.values():
-                if token.get("is_active", False):
-                    token["is_active"] = False
-                    count += 1
+                if not token.get("is_active", False):
+                    continue
+                if source is not None and token.get("source") != source:
+                    continue
+                token["is_active"] = False
+                count += 1
             if count:
                 await self._async_save()
         return count
@@ -135,41 +151,24 @@ class TokenManager:
     ) -> dict[str, Any] | None:
         """Validate a token by ID and secret.
 
-        Returns the token dict (without hash) if valid, None otherwise.
-
-        When ``count_use`` is True (the default for backwards compatibility),
-        the token's ``use_count`` is incremented on success. Callers that
-        only want to *check* validity (e.g. serving a page or status
-        endpoint) should pass ``count_use=False`` to avoid burning the
-        token's max_uses budget.
-
-        The whole read-modify-write of ``use_count`` is performed under
-        ``self._lock`` to avoid races between concurrent requests.
+        Returns a safe token dict (no hash) if valid, None otherwise. The
+        full read-modify-write critical section runs under ``self._lock``
+        so concurrent requests cannot race past max_uses or revocation.
         """
-        token = self._tokens.get(token_id)
-        if token is None:
-            _LOGGER.warning("Token validation failed: unknown ID %s", token_id)
-            return None
-
-        # All mutating checks (expiry-driven deactivate, max_uses exhaustion,
-        # use_count increment) happen under the lock. Pure secret comparison
-        # and the inactive check can happen first.
-        if not token.get("is_active", False):
-            _LOGGER.warning("Token validation failed: token %s is inactive", token_id)
-            return None
-
-        # Check secret first — fast bail before taking the lock if wrong.
-        if not self._verify_secret(token_secret, token.get("token_hash", "")):
-            _LOGGER.warning("Token validation failed: invalid secret for %s", token_id)
-            return None
-
         async with self._lock:
-            # Re-fetch under the lock in case it was revoked between checks.
             token = self._tokens.get(token_id)
-            if token is None or not token.get("is_active", False):
+            if token is None:
+                _LOGGER.warning("Token validation failed: unknown ID %s", token_id)
                 return None
 
-            # Check expiry
+            if not token.get("is_active", False):
+                _LOGGER.warning("Token validation failed: token %s is inactive", token_id)
+                return None
+
+            if not self._verify_secret(token_secret, token.get("token_hash", "")):
+                _LOGGER.warning("Token validation failed: invalid secret for %s", token_id)
+                return None
+
             expires_at = token.get("expires_at")
             if expires_at:
                 try:
@@ -183,7 +182,6 @@ class TokenManager:
                     _LOGGER.warning("Token %s has invalid expires_at: %s", token_id, expires_at)
                     return None
 
-            # Check use count
             max_uses = token.get("max_uses", 0)
             current = token.get("use_count", 0)
             if max_uses > 0 and current >= max_uses:
@@ -196,7 +194,6 @@ class TokenManager:
                 token["use_count"] = current + 1
                 await self._async_save()
 
-            # Return safe version (no hash)
             return self._safe_token(token)
 
     async def async_list_active(self) -> list[dict[str, Any]]:
@@ -244,8 +241,8 @@ class TokenManager:
         """Build the guest access URL for a token. Never stored — computed on demand.
 
         If ``base_url`` is provided, return an absolute URL; otherwise return
-        a path-only URL (legacy behavior, kept for tests / callers that
-        don't have a base).
+        a path-only URL. The proxy server is what actually builds absolute
+        URLs because it knows the guest-page host/port.
         """
         path = f"/gatekeeper/guest/{token_id}/{token_secret}"
         if base_url:
@@ -256,66 +253,28 @@ class TokenManager:
     def _hash_secret(secret: str) -> str:
         """Hash a token secret using bcrypt.
 
-        bcrypt is declared as a hard requirement in ``manifest.json``. The
-        SHA-256 fallback exists only so older tokens hashed without bcrypt
-        remain verifiable; new tokens always use bcrypt and the fallback
-        path logs a loud warning if it is ever hit.
+        bcrypt is a hard requirement declared in manifest.json; there is no
+        fallback. If bcrypt fails to import the integration won't load at all.
         """
-        if bcrypt:
-            return bcrypt.hashpw(
-                secret.encode("utf-8"), bcrypt.gensalt(rounds=BCRYPT_ROUNDS)
-            ).decode("utf-8")
-        _LOGGER.warning(
-            "bcrypt is not installed — falling back to SHA-256+salt for token hashing. "
-            "This is less secure; install the integration's declared bcrypt dependency."
-        )
-        salt = secrets.token_hex(16)
-        return f"$sha256${salt}${hashlib.sha256((salt + secret).encode('utf-8')).hexdigest()}"
+        return bcrypt.hashpw(
+            secret.encode("utf-8"), bcrypt.gensalt(rounds=BCRYPT_ROUNDS)
+        ).decode("utf-8")
 
     @staticmethod
     def _verify_secret(secret: str, token_hash: str) -> bool:
-        """Verify a secret against its stored hash.
-
-        Comparisons use ``hmac.compare_digest`` so they are constant-time
-        and don't leak information via timing.
-        """
-
-        if not token_hash:
+        """Verify a secret against its stored bcrypt hash (constant-time)."""
+        if not token_hash or not token_hash.startswith("$2"):
             return False
-        if token_hash.startswith("$2"):
-            # bcrypt hash — bcrypt.checkpw itself is constant-time.
-            if bcrypt:
-                try:
-                    return bcrypt.checkpw(secret.encode("utf-8"), token_hash.encode("utf-8"))
-                except Exception:
-                    return False
-            _LOGGER.warning(
-                "Token uses bcrypt hash but bcrypt is not installed — cannot verify"
-            )
+        try:
+            return bcrypt.checkpw(secret.encode("utf-8"), token_hash.encode("utf-8"))
+        except Exception:
             return False
-        elif token_hash.startswith("$sha256$"):
-            # SHA-256 fallback (deprecated — only present if a previous run
-            # of this integration didn't have bcrypt available).
-            try:
-                parts = token_hash.split("$")
-                if len(parts) != 4:
-                    return False
-                _, _, salt, expected_hash = parts
-                actual = hashlib.sha256((salt + secret).encode("utf-8")).hexdigest()
-                return hmac.compare_digest(actual, expected_hash)
-            except Exception:
-                return False
-        return False
 
     @staticmethod
     def _safe_token(token: dict[str, Any]) -> dict[str, Any]:
-        """Return a token dict with sensitive fields removed.
+        """Return a token dict with the secret hash removed.
 
-        Strips the hash, scope configuration, and service-level details
-        that should not be exposed to guest-facing endpoints.
+        Includes scope, source, show_wifi, and timing information needed by
+        the proxy to enforce access. Only ``token_hash`` is excluded.
         """
-        safe_keys = {
-            "token_id", "label", "created_at", "expires_at",
-            "max_uses", "use_count", "is_active",
-        }
-        return {k: v for k, v in token.items() if k in safe_keys}
+        return {k: v for k, v in token.items() if k != "token_hash"}

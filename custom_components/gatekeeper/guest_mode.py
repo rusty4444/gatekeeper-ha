@@ -10,8 +10,22 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.storage import Store
 
-from .const import DOMAIN, MODE_OFF, MODE_ON
+from .const import DOMAIN, MODE_OFF, MODE_ON, TOKEN_SOURCE_GUEST_MODE
 from .token_manager import TokenManager
+
+# Map an HA state value to the canonical service that produces it. Used to
+# translate safe-state overrides like ``{"light.kitchen": {"state": "on"}}``
+# into a real service call (``light.turn_on``).
+_STATE_TO_SERVICE: dict[str, str] = {
+    "on": "turn_on",
+    "off": "turn_off",
+    "locked": "lock",
+    "unlocked": "unlock",
+    "open": "open_cover",
+    "closed": "close_cover",
+    "home": "turn_on",
+    "away": "turn_off",
+}
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -67,7 +81,7 @@ class GuestModeManager:
         """
         if self._state == MODE_ON:
             _LOGGER.warning("Guest mode is already active — re-activating")
-            await self._cancel_auto_disable()
+            self._cancel_auto_disable()
 
         self._state = MODE_ON
 
@@ -106,13 +120,26 @@ class GuestModeManager:
         4. Persist state
         """
         self._state = MODE_OFF
-        await self._cancel_auto_disable()
+        self._cancel_auto_disable()
         self._auto_disable_at = None
         await self._restore_from_snapshot()
         await self._clear_snapshot()
-        await self._token_manager.async_revoke_all()
+        # Only revoke tokens that guest mode itself created — manual tokens
+        # from the admin card should survive a deactivate.
+        revoked = await self._token_manager.async_revoke_all(
+            source=TOKEN_SOURCE_GUEST_MODE
+        )
         await self._persist_state()
-        _LOGGER.info("Guest mode deactivated")
+        _LOGGER.info("Guest mode deactivated (revoked %d guest-mode tokens)", revoked)
+
+    async def async_shutdown(self) -> None:
+        """Tear down timers without changing persisted state.
+
+        Called from ``async_unload_entry`` / EVENT_HOMEASSISTANT_STOP. We
+        cancel the auto-disable handle here so HA's lingering-timer test
+        passes and reloads don't leak handles.
+        """
+        self._cancel_auto_disable()
 
     @property
     def is_active(self) -> bool:
@@ -256,20 +283,22 @@ class GuestModeManager:
         Falls back to a set of sensible defaults if no overrides configured.
         """
         if overrides:
-            # User-configured safe states take priority. Copy each target so we
-            # don't mutate the caller's dict (which the previous code did via pop()).
             for entity_id, target in overrides.items():
                 domain = entity_id.split(".")[0]
                 target = dict(target)
                 target_state = target.pop("state", None)
                 if not target_state:
                     continue
+                # Translate the HA state value (e.g. ``on``) into a real
+                # service name (``turn_on``). Without this mapping callers
+                # would invoke nonexistent services like ``light.on``.
+                service = _STATE_TO_SERVICE.get(target_state, target_state)
                 service_call_data: dict[str, Any] = {"entity_id": entity_id}
                 if target:
                     service_call_data.update(target)
                 try:
                     await self.hass.services.async_call(
-                        domain, target_state,
+                        domain, service,
                         service_call_data,
                         blocking=False,
                     )
@@ -277,31 +306,14 @@ class GuestModeManager:
                     _LOGGER.warning("Failed to set safe state for %s: %s", entity_id, exc)
             return
 
-        # Built-in sensible defaults for common domains
-        defaults = {
-            "lock": ("lock", "lock"),
-            "cover": ("cover", "close"),
-            "climate": ("climate", "set_hvac_mode", {"hvac_mode": "off"}),
-            "fan": ("fan", "turn_off"),
-            "switch": ("switch", "turn_off"),
-        }
-
-        for domain, config in defaults.items():
-            for state in self.hass.states.async_all(domain):
-                entity_id = state.entity_id
-                service = config[1]
-                service_data = {"entity_id": entity_id}
-                if len(config) > 2:
-                    service_data.update(config[2])
-                # Only apply if not already in desired state
-                try:
-                    await self.hass.services.async_call(
-                        domain, service,
-                        service_data,
-                        blocking=False,
-                    )
-                except Exception as exc:
-                    _LOGGER.debug("Safe state skip %s: %s", entity_id, exc)
+        # No overrides configured: do nothing. Slamming every entity in
+        # every domain during activation produces hundreds of redundant
+        # service calls and stomps on legitimate user state. Operators who
+        # want safe states should configure ``safe_state_overrides``
+        # explicitly (and may use the bundled blueprints).
+        _LOGGER.debug(
+            "No safe_state_overrides configured — skipping safe-state pass"
+        )
 
     async def _persist_state(self) -> None:
         """Persist current mode state."""
@@ -320,7 +332,7 @@ class GuestModeManager:
         if self._auto_disable_at is None:
             return
 
-        await self._cancel_auto_disable()
+        self._cancel_auto_disable()
 
         now = datetime.now(timezone.utc)
         delay = (self._auto_disable_at - now).total_seconds()
@@ -335,8 +347,8 @@ class GuestModeManager:
 
         self._auto_disable_unsub = async_call_later(self.hass, delay, _auto_disable)
 
-    async def _cancel_auto_disable(self) -> None:
-        """Cancel pending auto-disable task."""
+    def _cancel_auto_disable(self) -> None:
+        """Cancel pending auto-disable task (synchronous — unsub is sync)."""
         if self._auto_disable_unsub is not None:
             self._auto_disable_unsub()
             self._auto_disable_unsub = None

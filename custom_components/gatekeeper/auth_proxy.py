@@ -7,11 +7,18 @@ import fnmatch
 import logging
 from typing import Any
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .const import *
+from .const import (
+    DEFAULT_GUEST_PAGE_PORT,
+    OPT_GUEST_PORT,
+    OPT_SHOW_WIFI,
+    OPT_WIFI_PASSWORD,
+    OPT_WIFI_SSID,
+)
 from .token_manager import TokenManager
 
 _LOGGER = logging.getLogger(__name__)
@@ -247,25 +254,43 @@ class AuthProxyServer:
         self._runner = web.AppRunner(app)
         await self._runner.setup()
         site = web.TCPSite(self._runner, self._host, self._port)
-        # web.TCPSite.start() returns None; the site itself is what we
-        # hold on to so we can stop it later.
         await site.start()
         self._site = site
 
-        # Build the base URL used to construct absolute guest links. Prefer
-        # the HA external_url, fall back to internal_url, then to the
-        # bind host.
-        ha_url = (
-            self.hass.config.external_url
-            or self.hass.config.internal_url
-            or f"http://{self._host}:{self._port}"
-        )
-        self.external_url = ha_url.rstrip("/")
+        # Build the base URL for absolute guest links. The guest page lives
+        # on the proxy's own port — NOT the HA frontend's. HA's
+        # external_url/internal_url point at 8123 (or whatever the user has
+        # configured for the UI), so reusing them produces links that 404.
+        # If the user has a reverse proxy in front of the guest page they
+        # should configure it to forward the host+path; the host name from
+        # internal_url is reused but the port comes from the proxy.
+        host = self._host
+        for candidate in (
+            self.hass.config.external_url,
+            self.hass.config.internal_url,
+        ):
+            if not candidate:
+                continue
+            try:
+                parsed = urlparse(candidate)
+                if parsed.hostname:
+                    host = parsed.hostname
+                    break
+            except (ValueError, TypeError):
+                continue
+        scheme = "http"
+        self.external_url = f"{scheme}://{host}:{self._port}".rstrip("/")
 
-        _LOGGER.info("Gatekeeper guest proxy started on %s:%d", self._host, self._port)
+        _LOGGER.info(
+            "Gatekeeper guest proxy started on %s:%d (external URL: %s)",
+            self._host, self._port, self.external_url,
+        )
 
     def build_guest_url(self, token_id: str, token_secret: str) -> str:
-        """Return an absolute URL for a freshly created token."""
+        """Return an absolute URL for a freshly created token.
+
+        The URL always targets the guest-page port, never the HA UI port.
+        """
         base = self.external_url or f"http://{self._host}:{self._port}"
         return f"{base}/gatekeeper/guest/{token_id}/{token_secret}"
 
@@ -279,6 +304,50 @@ class AuthProxyServer:
             await self._runner.cleanup()
             self._runner = None
         _LOGGER.info("Gatekeeper guest proxy stopped")
+
+    def _check_browser_origin(self, request) -> bool:
+        """Reject cross-site state-changing requests.
+
+        The guest URL secret is effectively a bearer token. Without an
+        Origin/Referer check, any page the guest visits could POST to
+        ``/call_service`` and forge a state change. We allow requests when:
+
+        - ``Sec-Fetch-Site`` is ``same-origin``/``same-site``/``none`` (modern
+          browsers always send this; ``none`` covers direct address-bar
+          loads which can't include a JSON body anyway).
+        - OR the ``Origin``/``Referer`` host matches the request's Host
+          header (legacy fallback).
+
+        Requests from non-browser clients (curl, integrations) typically
+        send no Origin/Sec-Fetch headers. We still allow these because the
+        bearer secret is in the URL and a malicious page in a browser is
+        the actual CSRF threat; locking out scripted clients would break
+        the documented automation flows.
+        """
+        sec_fetch_site = request.headers.get("Sec-Fetch-Site")
+        if sec_fetch_site is not None:
+            if sec_fetch_site in ("same-origin", "same-site", "none"):
+                return True
+            _LOGGER.warning(
+                "Rejecting cross-site request to %s (Sec-Fetch-Site=%s)",
+                request.path, sec_fetch_site,
+            )
+            return False
+
+        origin = request.headers.get("Origin") or request.headers.get("Referer")
+        if origin:
+            try:
+                origin_host = urlparse(origin).netloc.split(":")[0].lower()
+            except (ValueError, TypeError):
+                return False
+            host_header = request.headers.get("Host", "").split(":")[0].lower()
+            if origin_host and host_header and origin_host != host_header:
+                _LOGGER.warning(
+                    "Rejecting request to %s — Origin host %r != Host header %r",
+                    request.path, origin_host, host_header,
+                )
+                return False
+        return True
 
     async def _validate_request(
         self, request, *, count_use: bool = False
@@ -324,32 +393,48 @@ class AuthProxyServer:
         return web.json_response(entities)
 
     async def _handle_status(self, request) -> "web.Response":
-        """Return token status including expiry timer."""
+        """Return token status including expiry timer.
+
+        WiFi password is redacted unless the token was created with
+        ``show_wifi=True`` AND the integration's global ``show_wifi`` option
+        is enabled. The SSID is fine to expose either way.
+        """
         from aiohttp import web
 
         token = await self._validate_request(request)
         if token is None:
             return web.json_response({"error": "Invalid token"}, status=401)
 
-        # Read config entry options directly from the entry we were given
-        # at construction time. (The old code called
-        # `config_entries.async_get_entry(DOMAIN)` which takes an entry_id,
-        # not a domain, and always returned None.)
         options = self._entry.options if self._entry else {}
-        wifi_ssid = options.get("wifi_ssid", "")
-        wifi_password = options.get("wifi_password", "")
+        wifi_ssid = options.get(OPT_WIFI_SSID, "")
+        wifi_password = options.get(OPT_WIFI_PASSWORD, "")
+        global_show_wifi = bool(options.get(OPT_SHOW_WIFI, False))
+        token_show_wifi = bool(token.get("show_wifi", False))
 
+        expose_password = global_show_wifi and token_show_wifi and bool(wifi_password)
         return web.json_response({
             "active": True,
             "expires_at": token.get("expires_at"),
             "expires_in": self._format_remaining(token.get("expires_at")),
             "wifi_ssid": wifi_ssid,
-            "wifi_password": wifi_password,
+            "wifi_password": wifi_password if expose_password else "",
+            "wifi_password_available": bool(wifi_password) and expose_password,
         })
 
     async def _handle_call_service(self, request) -> "web.Response":
-        """Proxy a service call with scope validation."""
+        """Proxy a service call with scope + CSRF validation."""
         from aiohttp import web
+
+        if not self._check_browser_origin(request):
+            return web.json_response({"error": "Cross-site request rejected"}, status=403)
+
+        # Require an explicit JSON Content-Type so simple HTML form CSRF
+        # (which can't set headers) is impossible.
+        content_type = (request.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        if content_type != "application/json":
+            return web.json_response(
+                {"error": "Content-Type must be application/json"}, status=415,
+            )
 
         # Only the action endpoint increments use_count.
         token = await self._validate_request(request, count_use=True)

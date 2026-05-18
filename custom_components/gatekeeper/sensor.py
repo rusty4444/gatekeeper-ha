@@ -20,7 +20,13 @@ from homeassistant.helpers.update_coordinator import (
     DataUpdateCoordinator,
 )
 
-from .const import *
+from .const import (
+    COORDINATOR_UPDATE_INTERVAL,
+    DOMAIN,
+    MANUFACTURER,
+    SENSOR_SOONEST_EXPIRY,
+    SENSOR_TOKENS,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -31,12 +37,15 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Gatekeeper sensor entities."""
-    # Reuse the coordinator created in __init__.async_setup_entry.
-    # Don't instantiate a second one — that would double-poll and let
-    # sensor/binary_sensor entities drift out of sync.
-    coordinator = hass.data.get(DOMAIN, {}).get("coordinator")
+    bucket = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+    coordinator = bucket.get("coordinator")
     if not coordinator:
-        _LOGGER.warning("Coordinator not found for sensor setup")
+        # This indicates a programmer error: async_setup_entry must run
+        # before the platforms are forwarded. Make it loud.
+        _LOGGER.error(
+            "Gatekeeper coordinator missing for entry %s — sensor setup aborted",
+            entry.entry_id,
+        )
         return
 
     async_add_entities([
@@ -59,8 +68,9 @@ class GatekeeperCoordinator(DataUpdateCoordinator):
 
     async def _async_update_data(self) -> dict:
         """Fetch current state from managers."""
-        token_manager = self.hass.data.get(DOMAIN, {}).get("token_manager")
-        guest_mode = self.hass.data.get(DOMAIN, {}).get("guest_mode")
+        bucket = self.hass.data.get(DOMAIN, {}).get(self.entry.entry_id, {})
+        token_manager = bucket.get("token_manager")
+        guest_mode = bucket.get("guest_mode")
 
         tokens = []
         soonest_expiry = None

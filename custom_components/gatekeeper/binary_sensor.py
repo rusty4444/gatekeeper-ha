@@ -15,7 +15,7 @@ from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
 )
 
-from .const import *
+from .const import BINARY_SENSOR_MODE, DOMAIN, MANUFACTURER
 from .sensor import GatekeeperCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -27,9 +27,13 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Gatekeeper binary sensor entities."""
-    coordinator = hass.data.get(DOMAIN, {}).get("coordinator")
+    bucket = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+    coordinator = bucket.get("coordinator")
     if not coordinator:
-        _LOGGER.warning("Coordinator not found for binary sensor setup")
+        _LOGGER.error(
+            "Gatekeeper coordinator missing for entry %s — binary sensor setup aborted",
+            entry.entry_id,
+        )
         return
 
     async_add_entities([

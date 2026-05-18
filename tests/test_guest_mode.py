@@ -65,6 +65,25 @@ async def test_auto_disable(hass):
     assert remaining is not None
     assert remaining > 0
 
+    # async_shutdown must cancel the timer so the HA fixture doesn't
+    # complain about lingering handles.
+    await guest_mgr.async_shutdown()
+
+
+@pytest.mark.asyncio
+async def test_async_shutdown_cancels_timer(hass):
+    """async_shutdown must cancel an active auto-disable timer."""
+    token_mgr = TokenManager(hass)
+    await token_mgr.async_load()
+    guest_mgr = GuestModeManager(hass, token_mgr)
+    await guest_mgr.async_load()
+
+    await guest_mgr.async_activate(auto_disable_hours=1.0)
+    assert guest_mgr._auto_disable_unsub is not None
+
+    await guest_mgr.async_shutdown()
+    assert guest_mgr._auto_disable_unsub is None
+
 
 @pytest.mark.asyncio
 async def test_auto_disable_zero_is_manual(hass):
@@ -79,21 +98,36 @@ async def test_auto_disable_zero_is_manual(hass):
 
 
 @pytest.mark.asyncio
-async def test_revoke_all_tokens_on_deactivate(hass):
-    """Test that deactivate_mode revokes all tokens."""
+async def test_deactivate_revokes_only_guest_mode_tokens(hass):
+    """Deactivate revokes tokens whose source is guest_mode and leaves manual tokens alone.
+
+    Previously deactivate revoked every token in the system, which clobbered
+    admin-issued tokens unrelated to guest mode. Source-scoped revocation
+    keeps manual tokens active across guest-mode cycles.
+    """
+    from custom_components.gatekeeper.const import (
+        TOKEN_SOURCE_GUEST_MODE,
+        TOKEN_SOURCE_MANUAL,
+    )
+
     token_mgr = TokenManager(hass)
     await token_mgr.async_load()
     guest_mgr = GuestModeManager(hass, token_mgr)
     await guest_mgr.async_load()
 
-    await token_mgr.async_create_token(label="GuestToken")
-    await token_mgr.async_create_token(label="GuestToken2")
+    manual_a = await token_mgr.async_create_token(
+        label="Manual", source=TOKEN_SOURCE_MANUAL,
+    )
+    guest_token = await token_mgr.async_create_token(
+        label="GuestModeToken", source=TOKEN_SOURCE_GUEST_MODE,
+    )
 
     await guest_mgr.async_activate()
     await guest_mgr.async_deactivate()
 
-    active_tokens = await token_mgr.async_list_active()
-    assert len(active_tokens) == 0
+    active_ids = {t["token_id"] for t in await token_mgr.async_list_active()}
+    assert manual_a["token_id"] in active_ids
+    assert guest_token["token_id"] not in active_ids
 
 
 @pytest.mark.asyncio
@@ -114,3 +148,7 @@ async def test_state_persistence(hass):
 
     assert guest_mgr2.state == MODE_ON
     assert guest_mgr2.is_active is True
+
+    # Tear down both timers so HA's lingering-timer check passes.
+    await guest_mgr.async_shutdown()
+    await guest_mgr2.async_shutdown()

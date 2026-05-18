@@ -48,6 +48,18 @@ ATTR_SET_SAFE_STATES = "set_safe_states"
 ATTR_DISABLE_SCRIPTS = "disable_scripts"
 ATTR_DISABLE_SCENES = "disable_scenes"
 ATTR_SAFE_STATE_OVERRIDES = "safe_state_overrides"  # dict of entity_id -> state dict
+ATTR_SHOW_WIFI = "show_wifi"  # per-token opt-in for exposing WiFi credentials
+ATTR_SOURCE = "source"  # token origin tag (e.g. "guest_mode", "manual")
+
+# Token sources
+TOKEN_SOURCE_MANUAL = "manual"
+TOKEN_SOURCE_GUEST_MODE = "guest_mode"
+
+# Config option keys
+OPT_GUEST_PORT = "guest_port"
+OPT_WIFI_SSID = "wifi_ssid"
+OPT_WIFI_PASSWORD = "wifi_password"
+OPT_SHOW_WIFI = "show_wifi"  # global default for WiFi exposure (off by default)
 
 # Sensor / entity constants
 SENSOR_TOKENS = f"{DOMAIN}_active_tokens"
@@ -98,6 +110,14 @@ __all__ = [
     "ATTR_DISABLE_SCRIPTS",
     "ATTR_DISABLE_SCENES",
     "ATTR_SAFE_STATE_OVERRIDES",
+    "ATTR_SHOW_WIFI",
+    "ATTR_SOURCE",
+    "TOKEN_SOURCE_MANUAL",
+    "TOKEN_SOURCE_GUEST_MODE",
+    "OPT_GUEST_PORT",
+    "OPT_WIFI_SSID",
+    "OPT_WIFI_PASSWORD",
+    "OPT_SHOW_WIFI",
     "SENSOR_TOKENS",
     "SENSOR_SOONEST_EXPIRY",
     "BINARY_SENSOR_MODE",
