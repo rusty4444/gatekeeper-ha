@@ -12,7 +12,12 @@ from homeassistant.config_entries import ConfigFlowResult, OptionsFlow
 from homeassistant.core import callback
 from homeassistant.helpers import config_validation as cv
 
-from .const import *
+from .const import (
+    DEFAULT_AUTO_DISABLE_HOURS,
+    DEFAULT_EXPIRY_HOURS,
+    DEFAULT_GUEST_PAGE_PORT,
+    DOMAIN,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -124,6 +129,10 @@ class GatekeeperOptionsFlow(OptionsFlow):
                         "wifi_password",
                         default=current.get("wifi_password", ""),
                     ): cv.string,
+                    vol.Optional(
+                        "show_wifi",
+                        default=current.get("show_wifi", False),
+                    ): cv.boolean,
                 }
             ),
             last_step=True,

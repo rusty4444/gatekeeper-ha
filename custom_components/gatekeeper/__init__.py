@@ -17,7 +17,38 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
-from .const import *
+from .const import (
+    ATTR_ALLOWED_SERVICES,
+    ATTR_AUTO_DISABLE_AFTER,
+    ATTR_AUTOMATION_ENTITY_IDS,
+    ATTR_DISABLE_AUTOMATIONS,
+    ATTR_DISABLE_SCENES,
+    ATTR_DISABLE_SCRIPTS,
+    ATTR_DURATION,
+    ATTR_LABEL,
+    ATTR_MAX_USES,
+    ATTR_SAFE_STATE_OVERRIDES,
+    ATTR_SCOPED_DOMAINS,
+    ATTR_SCOPED_ENTITIES,
+    ATTR_SET_SAFE_STATES,
+    ATTR_SHOW_WIFI,
+    ATTR_TOKEN_ID,
+    DEFAULT_EXPIRY_HOURS,
+    DEFAULT_GUEST_PAGE_PORT,
+    DOMAIN,
+    EVENT_MODE_ENDED,
+    EVENT_MODE_STARTED,
+    EVENT_TOKEN_CREATED,
+    EVENT_TOKEN_REVOKED,
+    GATEKEEPER_CONFIG_VERSION,
+    OPT_GUEST_PORT,
+    SERVICE_ACTIVATE_MODE,
+    SERVICE_CREATE_TOKEN,
+    SERVICE_DEACTIVATE_MODE,
+    SERVICE_GET_GUEST_URL,
+    SERVICE_GET_TOKENS,
+    SERVICE_REVOKE_TOKEN,
+)
 from .token_manager import TokenManager
 from .guest_mode import GuestModeManager
 from .auth_proxy import AuthProxyServer
@@ -42,45 +73,47 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     return True
 
 
+def _entry_data(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, Any]:
+    """Return the per-entry data bucket, creating it if missing."""
+    domain_bucket = hass.data.setdefault(DOMAIN, {})
+    return domain_bucket.setdefault(entry.entry_id, {})
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Gatekeeper from a config entry."""
-    hass.data.setdefault(DOMAIN, {})
+    bucket = _entry_data(hass, entry)
 
-    # Init token manager (persistent storage)
     token_manager = TokenManager(hass)
     await token_manager.async_load()
-    hass.data[DOMAIN]["token_manager"] = token_manager
+    bucket["token_manager"] = token_manager
 
-    # Init guest mode manager
     guest_mode = GuestModeManager(hass, token_manager)
     await guest_mode.async_load()
-    hass.data[DOMAIN]["guest_mode"] = guest_mode
+    bucket["guest_mode"] = guest_mode
 
-    # Init auth proxy server. Pass the entry so the proxy can read its
-    # options (wifi_ssid, etc.) without misusing async_get_entry.
-    proxy_port = entry.options.get("guest_port", DEFAULT_GUEST_PAGE_PORT)
+    proxy_port = entry.options.get(OPT_GUEST_PORT, DEFAULT_GUEST_PAGE_PORT)
     auth_proxy = AuthProxyServer(hass, token_manager, entry, port=proxy_port)
-    hass.data[DOMAIN]["auth_proxy"] = auth_proxy
+    bucket["auth_proxy"] = auth_proxy
 
-    # Register services
-    _register_services(hass, token_manager, guest_mode)
+    _register_services(hass, entry, token_manager, guest_mode)
 
-    # Init coordinator for sensor/binary_sensor entities
     coordinator = GatekeeperCoordinator(hass, entry)
     await coordinator.async_config_entry_first_refresh()
-    hass.data[DOMAIN]["coordinator"] = coordinator
+    bucket["coordinator"] = coordinator
 
-    # Forward setup to sensor + binary_sensor platforms.
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    # Start auth proxy when HA is fully started
     async def _start_proxy(_event=None):
         await auth_proxy.async_start()
 
-    # Register lifecycle hooks via async_on_unload so they are cleaned up
-    # automatically on reload/unload.
+    async def _stop_everything(_event=None):
+        # Tear down the proxy AND cancel any guest-mode timer so HA's
+        # lingering-timer check is satisfied and reloads don't leak.
+        await auth_proxy.async_stop()
+        await guest_mode.async_shutdown()
+
     entry.async_on_unload(
-        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, auth_proxy.async_stop)
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _stop_everything)
     )
 
     if hass.is_running:
@@ -97,21 +130,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload Gatekeeper."""
-    # Unload platforms first so entities are removed cleanly.
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
-    auth_proxy: AuthProxyServer | None = hass.data.get(DOMAIN, {}).get("auth_proxy")
+    bucket = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+    auth_proxy: AuthProxyServer | None = bucket.get("auth_proxy")
     if auth_proxy:
         await auth_proxy.async_stop()
+    guest_mode: GuestModeManager | None = bucket.get("guest_mode")
+    if guest_mode:
+        # Cancel auto-disable handle so reloads don't leak timers.
+        await guest_mode.async_shutdown()
 
-    # Remove services so a reload doesn't leave stale handlers pointing
-    # at closed managers.
-    for service in SERVICES_TO_REGISTER:
-        if hass.services.has_service(DOMAIN, service):
-            hass.services.async_remove(DOMAIN, service)
-
+    # Services are global; remove them only when the last entry unloads.
+    domain_bucket = hass.data.get(DOMAIN, {})
     if unload_ok:
-        hass.data.pop(DOMAIN, None)
+        domain_bucket.pop(entry.entry_id, None)
+    if not domain_bucket or all(eid == entry.entry_id for eid in domain_bucket):
+        for service in SERVICES_TO_REGISTER:
+            if hass.services.has_service(DOMAIN, service):
+                hass.services.async_remove(DOMAIN, service)
+        if unload_ok:
+            hass.data.pop(DOMAIN, None)
     return unload_ok
 
 
@@ -120,18 +159,19 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _LOGGER.debug("Migrating config entry from version %s", entry.version)
 
     if entry.version > GATEKEEPER_CONFIG_VERSION:
-        # Future versions should never need migration to a past version
         return False
 
     if entry.version == 1:
-        # Version 1 -> 2: add defaults for any new options introduced since split
         new_options = {**entry.options}
         new_options.setdefault("wifi_ssid", "")
         new_options.setdefault("wifi_password", "")
+        new_options.setdefault("show_wifi", False)
         new_options.setdefault("safe_state_lights", "off")
         new_options.setdefault("safe_state_locks", "locked")
         new_options.setdefault("safe_state_climate", "off")
-        hass.config_entries.async_update_entry(entry, options=new_options, version=GATEKEEPER_CONFIG_VERSION)
+        hass.config_entries.async_update_entry(
+            entry, options=new_options, version=GATEKEEPER_CONFIG_VERSION,
+        )
 
     _LOGGER.debug("Migration to version %s complete", GATEKEEPER_CONFIG_VERSION)
     return True
@@ -144,10 +184,17 @@ async def _update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 def _register_services(
     hass: HomeAssistant,
+    entry: ConfigEntry,
     token_manager: TokenManager,
     guest_mode: GuestModeManager,
 ) -> None:
-    """Register HA services (supports_response=True for data-returning services)."""
+    """Register HA services (supports_response=True for data-returning services).
+
+    Services are global by design — a single instance of the integration is
+    expected (enforced in the config flow). The closures capture the
+    managers for this entry; if multi-entry support is ever added, the
+    handlers will need to look up the correct entry first.
+    """
 
     async def _handle_create_token(call: ServiceCall) -> dict[str, Any]:
         label = call.data.get(ATTR_LABEL, "Guest")
@@ -156,6 +203,7 @@ def _register_services(
         scoped_domains = call.data.get(ATTR_SCOPED_DOMAINS, ["light", "switch"])
         allowed_services = call.data.get(ATTR_ALLOWED_SERVICES, None)
         max_uses = call.data.get(ATTR_MAX_USES, 0)
+        show_wifi = call.data.get(ATTR_SHOW_WIFI, False)
 
         token = await token_manager.async_create_token(
             label=label,
@@ -164,11 +212,15 @@ def _register_services(
             scoped_domains=scoped_domains,
             allowed_services=allowed_services,
             max_uses=max_uses,
+            show_wifi=show_wifi,
         )
-        hass.bus.async_fire(EVENT_TOKEN_CREATED, {"token_id": token["token_id"], "label": label})
+        hass.bus.async_fire(
+            EVENT_TOKEN_CREATED,
+            {"token_id": token["token_id"], "label": label},
+        )
 
-        # Build an absolute guest URL using the running proxy's base URL.
-        proxy: AuthProxyServer | None = hass.data.get(DOMAIN, {}).get("auth_proxy")
+        bucket = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+        proxy: AuthProxyServer | None = bucket.get("auth_proxy")
         guest_url = token["guest_url"]
         if proxy and proxy.external_url:
             guest_url = proxy.build_guest_url(token["token_id"], token["_secret"])
@@ -204,12 +256,12 @@ def _register_services(
             disable_scenes=disable_scenes,
             safe_state_overrides=safe_state_overrides,
         )
-        hass.bus.async_fire(EVENT_MODE_STARTED, {})
+        hass.bus.async_fire(EVENT_MODE_STARTED, {"entry_id": entry.entry_id})
         return {"success": True}
 
     async def _handle_deactivate_mode(call: ServiceCall) -> dict[str, bool]:
         await guest_mode.async_deactivate()
-        hass.bus.async_fire(EVENT_MODE_ENDED, {})
+        hass.bus.async_fire(EVENT_MODE_ENDED, {"entry_id": entry.entry_id})
         return {"success": True}
 
     async def _handle_get_tokens(call: ServiceCall) -> dict[str, list]:
@@ -217,11 +269,11 @@ def _register_services(
         return {"tokens": tokens}
 
     async def _handle_get_guest_url(call: ServiceCall) -> dict[str, str | None]:
-        proxy: AuthProxyServer | None = hass.data.get(DOMAIN, {}).get("auth_proxy")
+        bucket = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+        proxy: AuthProxyServer | None = bucket.get("auth_proxy")
         url = proxy.external_url if (proxy and proxy.external_url) else None
         return {"url": url}
 
-    # Register all services with supports_response where applicable
     hass.services.async_register(
         DOMAIN, SERVICE_CREATE_TOKEN, _handle_create_token,
         schema=vol.Schema({
@@ -231,6 +283,7 @@ def _register_services(
             vol.Optional(ATTR_SCOPED_DOMAINS, default=["light", "switch"]): vol.Any(cv.ensure_list, None),
             vol.Optional(ATTR_ALLOWED_SERVICES): vol.Any(cv.ensure_list, None),
             vol.Optional(ATTR_MAX_USES, default=0): vol.Coerce(int),
+            vol.Optional(ATTR_SHOW_WIFI, default=False): cv.boolean,
         }),
         supports_response=True,
     )

@@ -49,6 +49,13 @@ create_token:
         number:
           min: 0
           max: 10000
+    show_wifi:
+      name: Show WiFi password
+      description: Allow this token's guest page to display the configured WiFi password. Requires the integration-level "Show WiFi" option to also be enabled. Defaults to false (password is redacted).
+      required: false
+      default: false
+      selector:
+        boolean:
 
 revoke_token:
   name: Revoke guest token
