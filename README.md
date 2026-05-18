@@ -107,6 +107,18 @@ Blueprints (blueprints/)
 - Tokens can be use-limited (N API calls) in addition to time-limited
 - Guest mode snapshots automations on activate and restores them on deactivate
 
+## Guest Proxy & Reverse Proxy
+
+The guest page is served by a lightweight HTTP server embedded in the integration, bound to `0.0.0.0:8921` by default (reachable from any device on your LAN). This is required for the QR-code flow — guests scan the code from their phone.
+
+**If you run HA behind a reverse proxy** (Nginx, Caddy, Traefik, etc.) and only want the guest page accessible through that proxy:
+
+1. Set the guest port to a high local-only port (e.g. 58921) in **Settings → Devices & Services → Gatekeeper HA → Configure**
+2. Add a location block in your proxy config pointing to `http://127.0.0.1:58921`
+3. Restrict with your proxy's usual auth / IP allowlist rules
+
+The bind host can also be changed to `127.0.0.1` via [the options flow](#configuration) if you do not want it exposed on the LAN directly.
+
 ## Development
 
 ```bash
