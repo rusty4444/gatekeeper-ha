@@ -3,16 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import os
 from typing import Any
-from urllib.parse import urlencode, urlparse
-
 from datetime import datetime, timezone
 
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import *
 from .token_manager import TokenManager
@@ -97,15 +92,14 @@ GUEST_PAGE_HTML = """<!DOCTYPE html>
 
       html += '<div id="entities">';
       entities.forEach(e => {
-        const isOn = e.state === 'on' || e.state === 'open';
         html += '<div class="entity-card">';
         html += '<div><div class="name">' + (e.friendly_name || e.entity_id) + '</div>';
         html += '<div class="state">' + (e.state || 'unknown') + '</div></div>';
         html += '<div class="controls">';
-        html += '<button class="btn btn-on" onclick="toggleEntity(\\'' + e.entity_id + '\\', \\'on\\')">On</button>';
-        html += '<button class="btn btn-off" onclick="toggleEntity(\\'' + e.entity_id + '\\', \\'off\\')">Off</button>';
+        html += '<button class="btn btn-on" onclick="toggleEntity(\'' + e.entity_id + '\', \'on\')">On</button>';
+        html += '<button class="btn btn-off" onclick="toggleEntity(\'' + e.entity_id + '\', \'off\')">Off</button>';
         if (e.domain === 'lock') {
-          html += '<button class="btn btn-on" onclick="toggleEntity(\\'' + e.entity_id + '\\', \\'unlock\\')">Unlock</button>';
+          html += '<button class="btn btn-on" onclick="toggleEntity(\'' + e.entity_id + '\', \'unlock\')">Unlock</button>';
         }
         html += '</div></div>';
       });
@@ -164,6 +158,7 @@ class AuthProxyServer:
         self._token_manager = token_manager
         self._port = port
         self._host = host
+        self._runner: Any = None
         self._server: asyncio.AbstractServer | None = None
         self.external_url: str = ""
 
@@ -177,23 +172,27 @@ class AuthProxyServer:
         app.router.add_get("/api/gatekeeper/guest/{token_id}/{token_secret}/status", self._handle_status)
         app.router.add_post("/api/gatekeeper/guest/{token_id}/{token_secret}/call_service", self._handle_call_service)
 
-        runner = web.AppRunner(app)
-        await runner.setup()
-        self._server = await web.TCPSite(runner, self._host, self._port).start()
+        self._runner = web.AppRunner(app)
+        await self._runner.setup()
+        site = web.TCPSite(self._runner, self._host, self._port)
+        self._server = await site.start()
 
-        # Determine external URL
+        # Build external URL template (token_id/secret filled in by caller)
         ha_url = self.hass.config.external_url or f"http://{self._host}:{self._port}"
         self.external_url = f"{ha_url}/gatekeeper/guest/TOKEN_ID/TOKEN_SECRET"
 
         _LOGGER.info("Gatekeeper guest proxy started on %s:%d", self._host, self._port)
 
     async def async_stop(self, *args) -> None:
-        """Stop the HTTP server."""
+        """Stop the HTTP server and clean up the aiohttp app runner."""
         if self._server:
             self._server.close()
             await self._server.wait_closed()
             self._server = None
-            _LOGGER.info("Gatekeeper guest proxy stopped")
+        if self._runner:
+            await self._runner.cleanup()
+            self._runner = None
+        _LOGGER.info("Gatekeeper guest proxy stopped")
 
     async def _validate_request(self, request) -> dict[str, Any] | None:
         """Validate token from URL path. Returns token dict or None."""
@@ -236,12 +235,17 @@ class AuthProxyServer:
         if token is None:
             return web.json_response({"error": "Invalid token"}, status=401)
 
+        # Safely read config entry options
+        entry = self.hass.config_entries.async_get_entry(DOMAIN)
+        wifi_ssid = entry.options.get("wifi_ssid", "") if entry else ""
+        wifi_password = entry.options.get("wifi_password", "") if entry else ""
+
         return web.json_response({
             "active": True,
             "expires_at": token.get("expires_at"),
             "expires_in": self._format_remaining(token.get("expires_at")),
-            "wifi_ssid": self.hass.config_entries.async_get_entry("gatekeeper").options.get("wifi_ssid", "") if self.hass.config_entries.async_get_entry("gatekeeper") else "",
-            "wifi_password": self.hass.config_entries.async_get_entry("gatekeeper").options.get("wifi_password", "") if self.hass.config_entries.async_get_entry("gatekeeper") else "",
+            "wifi_ssid": wifi_ssid,
+            "wifi_password": wifi_password,
         })
 
     async def _handle_call_service(self, request) -> "web.Response":
@@ -270,7 +274,7 @@ class AuthProxyServer:
             await self.hass.services.async_call(
                 domain, service,
                 {"entity_id": entity_id, **service_data},
-                blocking=True,
+                blocking=False,
             )
             return web.json_response({"success": True})
         except Exception as exc:
@@ -307,8 +311,6 @@ class AuthProxyServer:
                 "state": state.state,
                 "friendly_name": state.attributes.get("friendly_name", ""),
             })
-
-            _LOGGER.debug("Guest seeable entity: %s", entity_id)
 
         return results
 
