@@ -36,14 +36,16 @@ Gatekeeper HA is not yet in the default HACS store. For now:
 
 ### 2. Install the Lovelace Card
 
-The [Gatekeeper Guest Portal card](https://github.com/rusty4444/gatekeeper-card) is distributed from its own repository:
+The [Gatekeeper Guest Portal card](https://github.com/rusty4444/gatekeeper-card) is distributed from its own repository, with independent versioning and releases.
 
 1. Go to HACS → Frontend → Custom Repositories
 2. Add: `https://github.com/rusty4444/gatekeeper-card`
 3. Category: Lovelace
-4. Find **Gatekeeper Guest Portal** and install
-5. Add the resource: `/hacsfiles/gatekeeper-card/gatekeeper-card.js`
+4. Search for **Gatekeeper Guest Portal** and install
+5. Add the resource: `/hacsfiles/gatekeeper-card/gatekeeper-card.js` (Type: JavaScript Module)
 6. Add card to any dashboard: `type: custom:gatekeeper-card`
+
+For full card documentation, see the [gatekeeper-card repo](https://github.com/rusty4444/gatekeeper-card).
 
 ### 3. Configure
 
@@ -90,7 +92,11 @@ Custom integration (custom_components/gatekeeper/)
 ├── services.yaml         # 6 HA services (create/revoke token, activate/deactivate mode, etc.)
 └── ...
 
+<<<<<<< HEAD
 Lovelace card — see [rusty4444/gatekeeper-card](https://github.com/rusty4444/gatekeeper-card)
+=======
+Lovelace card (separate repo: https://github.com/rusty4444/gatekeeper-card)
+>>>>>>> 9c197b6 (Update README to point to separate gatekeeper-card repo)
 ├── src/index.js          # LitElement card — admin panel, QR display, token management
 └── ...
 
@@ -134,9 +140,15 @@ pip install -r requirements-dev.txt
 # Run tests
 pytest tests/
 
+<<<<<<< HEAD
 # Build Lovelace card (in its own repo)
 # git clone https://github.com/rusty4444/gatekeeper-card
 # cd gatekeeper-card && npm install && npm run build
+=======
+# Build Lovelace card (separate repo: https://github.com/rusty4444/gatekeeper-card)
+git clone https://github.com/rusty4444/gatekeeper-card
+cd gatekeeper-card && npm install && npm run build
+>>>>>>> 9c197b6 (Update README to point to separate gatekeeper-card repo)
 ```
 
 ## Requirements
