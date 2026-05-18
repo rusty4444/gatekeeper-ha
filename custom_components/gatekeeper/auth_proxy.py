@@ -58,16 +58,41 @@ GUEST_PAGE_HTML = """<!DOCTYPE html>
 </div>
 <script>
 (function() {
+  // Build the API base from the URL. The token secret never leaves the page —
+  // we do NOT interpolate it into any string that becomes HTML.
   const pathParts = window.location.pathname.split('/');
   const tokenId = pathParts[3];
   const tokenSecret = pathParts[4];
-  const BASE = '/api/gatekeeper/guest/' + tokenId + '/' + tokenSecret;
+  const BASE = '/api/gatekeeper/guest/' + encodeURIComponent(tokenId) +
+               '/' + encodeURIComponent(tokenSecret);
+
+  function el(tag, attrs, children) {
+    const node = document.createElement(tag);
+    if (attrs) {
+      for (const k in attrs) {
+        if (k === 'class') node.className = attrs[k];
+        else if (k === 'text') node.textContent = attrs[k];
+        else if (k.startsWith('on') && typeof attrs[k] === 'function') {
+          node.addEventListener(k.slice(2), attrs[k]);
+        } else {
+          node.setAttribute(k, attrs[k]);
+        }
+      }
+    }
+    if (children) {
+      for (const c of children) {
+        if (c == null) continue;
+        node.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+      }
+    }
+    return node;
+  }
 
   async function callService(domain, service, entityId, data) {
     const resp = await fetch(BASE + '/call_service', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ domain, service, entity_id: entityId, data: data || {} })
+      body: JSON.stringify({ domain: domain, service: service, entity_id: entityId, data: data || {} })
     });
     return resp.json();
   }
@@ -82,54 +107,92 @@ GUEST_PAGE_HTML = """<!DOCTYPE html>
     return resp.json();
   }
 
+  function renderHeader() {
+    return el('div', { class: 'header' }, [ el('h1', { text: 'Guest Controls' }) ]);
+  }
+
+  function renderTimer(status) {
+    return el('div', { class: 'timer-bar' }, [
+      el('span', { class: 'label', text: 'Session expires' }),
+      el('span', { class: 'time', id: 'timer', text: status.expires_in || '--' }),
+    ]);
+  }
+
+  function renderEntityCard(e) {
+    const name = el('div', { class: 'name', text: e.friendly_name || e.entity_id });
+    const state = el('div', { class: 'state', text: e.state || 'unknown' });
+    const controls = el('div', { class: 'controls' });
+
+    const btnOn = el('button', { class: 'btn btn-on', text: 'On',
+      onclick: function() { toggleEntity(e.entity_id, 'on'); } });
+    const btnOff = el('button', { class: 'btn btn-off', text: 'Off',
+      onclick: function() { toggleEntity(e.entity_id, 'off'); } });
+    controls.appendChild(btnOn);
+    controls.appendChild(btnOff);
+    if (e.domain === 'lock') {
+      controls.appendChild(el('button', { class: 'btn btn-on', text: 'Unlock',
+        onclick: function() { toggleEntity(e.entity_id, 'unlock'); } }));
+    }
+
+    return el('div', { class: 'entity-card' }, [
+      el('div', null, [ name, state ]),
+      controls,
+    ]);
+  }
+
+  function renderWifi(status) {
+    return el('div', { class: 'wifi-info' }, [
+      el('h3', { text: 'WiFi & House Info' }),
+      el('div', { class: 'detail' }, [
+        el('span', { text: 'Network' }),
+        el('span', { text: status.wifi_ssid || '--' }),
+      ]),
+      el('div', { class: 'detail' }, [
+        el('span', { text: 'Password' }),
+        el('span', { text: status.wifi_password || '--' }),
+      ]),
+    ]);
+  }
+
+  function renderError(app, message) {
+    app.textContent = '';
+    app.appendChild(el('div', { class: 'error', text: message }));
+  }
+
   async function render() {
     const app = document.getElementById('app');
     try {
       const status = await fetchStatus();
       const entities = await fetchEntities();
 
-      let html = '<div class="header"><h1>Guest Controls</h1></div>';
-      html += '<div class="timer-bar"><span class="label">Session expires</span><span class="time" id="timer">' +
-              (status.expires_in || '--') + '</span></div>';
+      app.textContent = '';
+      app.appendChild(renderHeader());
+      app.appendChild(renderTimer(status));
 
-      html += '<div id="entities">';
-      entities.forEach(e => {
-        html += '<div class="entity-card">';
-        html += '<div><div class="name">' + (e.friendly_name || e.entity_id) + '</div>';
-        html += '<div class="state">' + (e.state || 'unknown') + '</div></div>';
-        html += '<div class="controls">';
-        html += '<button class="btn btn-on" onclick="toggleEntity(\'' + e.entity_id + '\', \'on\')">On</button>';
-        html += '<button class="btn btn-off" onclick="toggleEntity(\'' + e.entity_id + '\', \'off\')">Off</button>';
-        if (e.domain === 'lock') {
-          html += '<button class="btn btn-on" onclick="toggleEntity(\'' + e.entity_id + '\', \'unlock\')">Unlock</button>';
-        }
-        html += '</div></div>';
-      });
-      html += '</div>';
+      const list = el('div', { id: 'entities' });
+      (entities || []).forEach(function(e) { list.appendChild(renderEntityCard(e)); });
+      app.appendChild(list);
 
-      html += '<div class="wifi-info"><h3>WiFi &amp; House Info</h3>';
-      html += '<div class="detail"><span>Network</span><span>' + (status.wifi_ssid || '--') + '</span></div>';
-      html += '<div class="detail"><span>Password</span><span>' + (status.wifi_password || '--') + '</span></div>';
-      html += '</div>';
-
-      app.innerHTML = html;
+      app.appendChild(renderWifi(status));
 
       if (status.expires_at) {
-        const expires = new Date(status.expires_at + 'Z').getTime();
+        // expires_at is sent as a UTC ISO8601 string by the server; use it directly.
+        const expires = new Date(status.expires_at).getTime();
         setInterval(function() {
           const now = new Date().getTime();
           const diff = Math.max(0, expires - now);
           const h = Math.floor(diff / 3600000);
           const m = Math.floor((diff % 3600000) / 60000);
-          document.getElementById('timer').textContent = h + 'h ' + m + 'm';
+          const t = document.getElementById('timer');
+          if (t) t.textContent = h + 'h ' + m + 'm';
         }, 10000);
       }
-    } catch(e) {
-      app.innerHTML = '<div class="error">Failed to load guest controls. Invalid or expired link.</div>';
+    } catch (err) {
+      renderError(app, 'Failed to load guest controls. Invalid or expired link.');
     }
   }
 
-  window.toggleEntity = async function(entityId, action) {
+  async function toggleEntity(entityId, action) {
     const domain = entityId.split('.')[0];
     let service = action;
     if (action === 'on') service = 'turn_on';
@@ -137,7 +200,7 @@ GUEST_PAGE_HTML = """<!DOCTYPE html>
     else if (action === 'unlock') service = 'unlock';
     await callService(domain, service, entityId);
     render();
-  };
+  }
 
   render();
 })();
