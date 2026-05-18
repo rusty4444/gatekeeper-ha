@@ -19,6 +19,8 @@
 // internet access at render time, and unpkg in particular has been
 // observed to serve stale/redirected modules.
 import { LitElement, html, css } from 'lit';
+import { unsafeHTML } from 'lit/directives/unsafe-html.js';
+import QRCode from 'qrcode';
 
 class GatekeeperCard extends LitElement {
   static get properties() {
@@ -29,6 +31,7 @@ class GatekeeperCard extends LitElement {
       _modeActive: { type: Boolean },
       _modeRemaining: { type: String },
       _guestUrl: { type: String },
+      _qrSvg: { type: String },
       _loading: { type: Boolean },
       _newToken: { type: Object },
       _showCreateForm: { type: Boolean },
@@ -42,6 +45,7 @@ class GatekeeperCard extends LitElement {
     this._modeActive = false;
     this._modeRemaining = '';
     this._guestUrl = '';
+    this._qrSvg = '';
     this._loading = true;
     this._newToken = null;
     this._showCreateForm = false;
@@ -76,7 +80,12 @@ class GatekeeperCard extends LitElement {
       this._tokens = tokensResult?.response?.tokens || [];
 
       if (urlResult?.response?.url) {
-        this._guestUrl = urlResult.response.url;
+        const url = urlResult.response.url;
+        if (url !== this._guestUrl) {
+          this._guestUrl = url;
+          // Generate the QR SVG locally. The string never leaves the browser.
+          this._qrSvg = await this._renderQr(url);
+        }
       }
 
       this._modeActive = modeState;
@@ -167,6 +176,24 @@ class GatekeeperCard extends LitElement {
     this._loading = false;
   }
 
+  async _renderQr(text) {
+    if (!text) return '';
+    try {
+      // 'M' error correction + a comfortable margin keep the code reliable
+      // on phones from across the room. Output is a plain SVG string.
+      return await QRCode.toString(text, {
+        type: 'svg',
+        errorCorrectionLevel: 'M',
+        margin: 1,
+        width: 200,
+        color: { dark: '#000000', light: '#ffffff' },
+      });
+    } catch (e) {
+      // Fall back to no QR if the library throws (very long URL etc.).
+      return '';
+    }
+  }
+
   _copyToClipboard(text) {
     navigator.clipboard.writeText(text).catch(() => {});
   }
@@ -253,11 +280,14 @@ class GatekeeperCard extends LitElement {
         <!-- Guest link share -->
         ${this._guestUrl ? html`
           <div class="section qr-section">
-            <h3>Guest Access Link</h3>
+            <h3>Guest Access QR</h3>
             <p class="qr-hint">
-              Send this link to your guest. A scannable QR code is rendered
-              locally once the card is built from source (see README).
+              Scan with a phone camera. The QR is rendered locally — the link
+              and token never leave this browser.
             </p>
+            ${this._config.show_qr && this._qrSvg ? html`
+              <div class="qr-code">${unsafeHTML(this._qrSvg)}</div>
+            ` : ''}
             <div class="url-display">
               <input type="text" .value=${this._guestUrl} readonly />
               <ha-button @click=${() => this._copyToClipboard(this._guestUrl)}>Copy</ha-button>
@@ -409,7 +439,18 @@ class GatekeeperCard extends LitElement {
       .token-warning { font-size: 0.75rem; opacity: 0.6; margin-top: 8px; }
       .qr-section { text-align: center; }
       .qr-hint { font-size: 0.85rem; opacity: 0.6; }
-      .qr-code { width: 200px; height: 200px; margin: 12px auto; border-radius: 8px; }
+      .qr-code {
+        width: 200px;
+        height: 200px;
+        margin: 12px auto;
+        padding: 8px;
+        background: #fff;
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .qr-code svg { width: 100%; height: 100%; display: block; }
       .url-display {
         display: flex; gap: 8px; margin-top: 8px;
       }
