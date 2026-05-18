@@ -1,7 +1,16 @@
-"""Generate a professional screenshot for Gatekeeper HA repo."""
+"""Generate a professional screenshot for Gatekeeper HA repo.
+
+Usage: python scripts/generate_screenshot.py [output_path]
+Default output: <repo>/docs/screenshot.png
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
-import os
 
 W = 1280
 H = 800
@@ -11,9 +20,16 @@ draw = ImageDraw.Draw(img)
 
 # Try to load a nice font
 font_paths = [
+    # macOS
     "/System/Library/Fonts/SFNSDisplay.ttf",
     "/System/Library/Fonts/Helvetica.ttc",
     "/Library/Fonts/Arial.ttf",
+    # Linux
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    "/usr/share/fonts/TTF/DejaVuSans.ttf",
+    # Windows
+    "C:\\Windows\\Fonts\\arial.ttf",
 ]
 title_font = None
 body_font = None
@@ -128,7 +144,12 @@ draw.ellipse([24, 10, 34, 20], fill=(255, 189, 46))   # yellow
 draw.ellipse([38, 10, 48, 20], fill=(39, 202, 78))     # green
 
 # Save
-out_path = "/Users/sam.russell/dev/gatekeeper-ha/docs/screenshot.png"
+# Default to <repo>/docs/screenshot.png relative to this script so the script
+# works regardless of who runs it or where they cloned the repo.
+repo_root = Path(__file__).resolve().parent.parent
+default_out = repo_root / "docs" / "screenshot.png"
+out_path = Path(sys.argv[1]) if len(sys.argv) > 1 else default_out
+out_path.parent.mkdir(parents=True, exist_ok=True)
 img.save(out_path)
 print(f"Saved: {out_path}")
 print(f"Size: {img.size}")

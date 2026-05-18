@@ -14,7 +14,11 @@
  *   default_duration: 24
  */
 
-import { LitElement, html, css } from 'https://unpkg.com/lit@3.0.0?module';
+// Lit is imported from npm and bundled by rollup (see rollup.config.js).
+// Do NOT switch this to a CDN URL — HA frontends should not require
+// internet access at render time, and unpkg in particular has been
+// observed to serve stale/redirected modules.
+import { LitElement, html, css } from 'lit';
 
 class GatekeeperCard extends LitElement {
   static get properties() {
@@ -87,8 +91,18 @@ class GatekeeperCard extends LitElement {
   async _getModeState() {
     try {
       const state = this._hass.states['binary_sensor.guest_mode_active'];
+      // Populate the remaining-time string so the header reflects auto-disable countdown.
+      const remaining = state?.attributes?.mode_remaining_seconds;
+      if (typeof remaining === 'number' && remaining > 0) {
+        const h = Math.floor(remaining / 3600);
+        const m = Math.floor((remaining % 3600) / 60);
+        this._modeRemaining = h > 0 ? `${h}h ${m}m` : `${m}m`;
+      } else {
+        this._modeRemaining = '';
+      }
       return state?.state === 'on';
     } catch {
+      this._modeRemaining = '';
       return false;
     }
   }
@@ -159,7 +173,9 @@ class GatekeeperCard extends LitElement {
 
   _formatExpiry(iso) {
     if (!iso) return '--';
-    const expires = new Date(iso + 'Z');
+    // Tolerate both 'Z' and '+00:00' suffixes that the server may emit.
+    const stamp = /Z$|[+-]\d{2}:?\d{2}$/.test(iso) ? iso : iso + 'Z';
+    const expires = new Date(stamp);
     const now = new Date();
     const diff = Math.max(0, expires - now);
     const h = Math.floor(diff / 3600000);
@@ -395,6 +411,14 @@ class GatekeeperCard extends LitElement {
     `;
   }
 }
+
+// HA uses getCardSize() to compute view layout. Without it the card defaults
+// to size 1 and can be cropped or jammed against neighbouring cards.
+GatekeeperCard.prototype.getCardSize = function () {
+  const baseRows = 3; // header + toggle + section title
+  const tokenRows = Math.max(1, (this._tokens || []).length);
+  return baseRows + tokenRows + (this._guestUrl ? 2 : 0);
+};
 
 customElements.define('gatekeeper-card', GatekeeperCard);
 

@@ -1,70 +1,37 @@
-"""Pytest configuration for Gatekeeper HA tests."""
+"""Pytest configuration for Gatekeeper HA tests.
+
+These tests rely on `pytest-homeassistant-custom-component`, which provides a
+real `hass` fixture (running on an asyncio loop) along with `hass_storage` and
+`MockConfigEntry`. The previous hand-rolled MagicMock-based `hass` fixture
+could not satisfy HA's `Store.async_load` (which awaits
+`hass.async_add_executor_job`) and made every storage-touching test crash with
+``TypeError: object MagicMock can't be used in 'await' expression``.
+
+Anything project-specific can be added here; the HA fixtures themselves come
+from the plugin and do not need to be re-declared.
+"""
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, PropertyMock
+# Enables the HA fixtures (`hass`, `hass_storage`, `MockConfigEntry`, ...).
+pytest_plugins = ["pytest_homeassistant_custom_component"]
 
+
+def pytest_configure(config):  # noqa: D401 - pytest hook signature
+    """Auto-enable custom-component loading for every test."""
+    # Required by pytest-homeassistant-custom-component so HA permits
+    # importing from `custom_components/`.
+    config.addinivalue_line(
+        "markers",
+        "enable_custom_integrations: enable loading of custom_components in HA fixture",
+    )
+
+
+# Apply the enable_custom_integrations fixture globally.
 import pytest
 
 
-@pytest.fixture
-def hass():
-    """Create a mock Home Assistant instance for testing."""
-    hass = MagicMock()
-    hass.data = {}
-    hass.states = MagicMock()
-    hass.states.async_all = MagicMock(return_value=[])
-    hass.states.get = MagicMock(return_value=None)
-
-    # Mock services
-    hass.services = MagicMock()
-    hass.services.async_call = MagicMock()
-
-    # Mock bus
-    hass.bus = MagicMock()
-    hass.bus.async_fire = MagicMock()
-
-    return hass
-
-
-@pytest.fixture
-def hass_with_states(hass):
-    """Create a mock HA instance with some entities."""
-    from types import SimpleNamespace
-
-    light_living = SimpleNamespace(
-        entity_id="light.living_room",
-        domain="light",
-        state="on",
-        attributes={"friendly_name": "Living Room Light"},
-    )
-    light_kitchen = SimpleNamespace(
-        entity_id="light.kitchen",
-        domain="light",
-        state="off",
-        attributes={"friendly_name": "Kitchen Light"},
-    )
-    lock_door = SimpleNamespace(
-        entity_id="lock.front_door",
-        domain="lock",
-        state="locked",
-        attributes={"friendly_name": "Front Door"},
-    )
-    climate_upstairs = SimpleNamespace(
-        entity_id="climate.upstairs",
-        domain="climate",
-        state="cool",
-        attributes={"friendly_name": "Upstairs Thermostat", "temperature": 22},
-    )
-    sensor_temp = SimpleNamespace(
-        entity_id="sensor.temperature",
-        domain="sensor",
-        state="21.5",
-        attributes={"friendly_name": "Temperature"},
-    )
-
-    hass.states.async_all = MagicMock(
-        return_value=[light_living, light_kitchen, lock_door, climate_upstairs, sensor_temp]
-    )
-
-    return hass
+@pytest.fixture(autouse=True)
+def auto_enable_custom_integrations(enable_custom_integrations):
+    """Automatically allow custom integrations in every test."""
+    yield

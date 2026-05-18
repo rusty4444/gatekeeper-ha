@@ -8,6 +8,9 @@
     "watch": "rollup -c --watch",
     "lint": "eslint src/"
   },
+  "dependencies": {
+    "lit": "^3.1.0"
+  },
   "devDependencies": {
     "@rollup/plugin-node-resolve": "^15.0.0",
     "@rollup/plugin-terser": "^0.4.0",

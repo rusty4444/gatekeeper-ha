@@ -1,6 +1,8 @@
 blueprint:
   name: Gatekeeper — Guest token on doorbell
-  description: Auto-create a guest token when the doorbell rings, display QR on tablet
+  description: >
+    Auto-create a guest token when the doorbell rings and notify the
+    homeowner with the share link.
   domain: automation
   source_url: https://github.com/rusty4444/gatekeeper-ha/blob/main/blueprints/guest_arrived.yaml
   input:
@@ -19,14 +21,19 @@ blueprint:
           min: 1
           max: 168
           unit_of_measurement: hours
-    notification_device:
-      name: Notification device
-      description: Mobile device to send the token link to
-      default: []
+    notify_action:
+      name: Notification action
+      description: >
+        The notify action to call (e.g. notify.mobile_app_<your_phone>).
+        Pick the specific notify service for the device that should receive
+        the link — the generic notify.mobile_app group does not exist.
       selector:
-        device:
-          integration: mobile_app
-          multiple: true
+        action:
+
+# Expose the blueprint inputs we want to template against as variables.
+# Without this block, !input names are NOT available inside Jinja.
+variables:
+  token_duration_var: !input token_duration
 
 trigger:
   - platform: state
@@ -37,7 +44,7 @@ action:
   - service: gatekeeper.create_token
     data:
       label: "Doorbell guest"
-      duration: !input token_duration
+      duration: "{{ token_duration_var }}"
       scoped_entities:
         - "lock.*"
         - "light.*"
@@ -50,13 +57,12 @@ action:
         - light.turn_off
     response_variable: token_result
 
-  - if:
-      - condition: template
-        value_template: "{{ token_result is defined }}"
-    then:
-      - service: notify.mobile_app
-        target:
-          device_id: !input notification_device
-        data:
-          title: "Doorbell guest link created"
-          message: "Guest link expires in {{ token_duration }} hours. Share: {{ token_result['guest_url'] }}"
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: >
+              {{ token_result is mapping and token_result.get('guest_url') }}
+        sequence: !input notify_action
+    # The notify action receives token_result via the action's own template
+    # context. Configure your notify message to use {{ token_result.guest_url }}
+    # and {{ token_duration_var }} when wiring up the action.
