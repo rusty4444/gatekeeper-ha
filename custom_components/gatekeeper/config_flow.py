@@ -8,7 +8,7 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.config_entries import ConfigFlowResult, OptionsFlowWithConfigEntry
+from homeassistant.config_entries import ConfigFlowResult, OptionsFlow
 from homeassistant.core import callback
 from homeassistant.helpers import config_validation as cv
 
@@ -65,11 +65,15 @@ class GatekeeperConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         config_entry: config_entries.ConfigEntry,
     ) -> config_entries.OptionsFlow:
         """Get the options flow."""
-        return GatekeeperOptionsFlow(config_entry)
+        return GatekeeperOptionsFlow()
 
 
-class GatekeeperOptionsFlow(OptionsFlowWithConfigEntry):
-    """Handle options flow for Gatekeeper HA."""
+class GatekeeperOptionsFlow(OptionsFlow):
+    """Handle options flow for Gatekeeper HA.
+
+    Note: `self.config_entry` is provided automatically by the base class
+    in HA 2024.12+. Do not store it manually.
+    """
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None

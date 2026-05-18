@@ -8,7 +8,11 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EVENT_HOMEASSISTANT_STOP, Platform
+from homeassistant.const import (
+    EVENT_HOMEASSISTANT_STARTED,
+    EVENT_HOMEASSISTANT_STOP,
+    Platform,
+)
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
@@ -21,7 +25,16 @@ from .sensor import GatekeeperCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = ["sensor", "binary_sensor"]
+PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR]
+
+SERVICES_TO_REGISTER = (
+    SERVICE_CREATE_TOKEN,
+    SERVICE_REVOKE_TOKEN,
+    SERVICE_ACTIVATE_MODE,
+    SERVICE_DEACTIVATE_MODE,
+    SERVICE_GET_TOKENS,
+    SERVICE_GET_GUEST_URL,
+)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -56,16 +69,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await coordinator.async_config_entry_first_refresh()
     hass.data[DOMAIN]["coordinator"] = coordinator
 
+    # Forward setup to sensor + binary_sensor platforms.
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
     # Start auth proxy when HA is fully started
     async def _start_proxy(_event=None):
         await auth_proxy.async_start()
 
-    hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, auth_proxy.async_stop)
+    # Register lifecycle hooks via async_on_unload so they are cleaned up
+    # automatically on reload/unload.
+    entry.async_on_unload(
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, auth_proxy.async_stop)
+    )
 
     if hass.is_running:
         hass.async_create_task(_start_proxy())
     else:
-        hass.bus.async_listen_once("homeassistant_started", _start_proxy)
+        entry.async_on_unload(
+            hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _start_proxy)
+        )
 
     entry.async_on_unload(entry.add_update_listener(_update_listener))
 
@@ -74,12 +96,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload Gatekeeper."""
+    # Unload platforms first so entities are removed cleanly.
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
     auth_proxy: AuthProxyServer | None = hass.data.get(DOMAIN, {}).get("auth_proxy")
     if auth_proxy:
         await auth_proxy.async_stop()
 
-    hass.data.pop(DOMAIN, None)
-    return True
+    # Remove services so a reload doesn't leave stale handlers pointing
+    # at closed managers.
+    for service in SERVICES_TO_REGISTER:
+        if hass.services.has_service(DOMAIN, service):
+            hass.services.async_remove(DOMAIN, service)
+
+    if unload_ok:
+        hass.data.pop(DOMAIN, None)
+    return unload_ok
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
