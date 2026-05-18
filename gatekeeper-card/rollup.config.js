@@ -1,3 +1,4 @@
+import commonjs from '@rollup/plugin-commonjs';
 import resolve from '@rollup/plugin-node-resolve';
 import terser from '@rollup/plugin-terser';
 
@@ -9,7 +10,9 @@ export default {
     sourcemap: true,
   },
   plugins: [
-    resolve(),
+    resolve({ browser: true, preferBuiltins: false }),
+    // qrcode is published as CommonJS; this plugin lets rollup bundle it.
+    commonjs(),
     terser({
       // Preserve class and function names for nicer HA dev-tools output.
       keep_classnames: true,
