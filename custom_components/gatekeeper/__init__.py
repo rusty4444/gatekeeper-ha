@@ -43,9 +43,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await guest_mode.async_load()
     hass.data[DOMAIN]["guest_mode"] = guest_mode
 
-    # Init auth proxy server
+    # Init auth proxy server. Pass the entry so the proxy can read its
+    # options (wifi_ssid, etc.) without misusing async_get_entry.
     proxy_port = entry.options.get("guest_port", DEFAULT_GUEST_PAGE_PORT)
-    auth_proxy = AuthProxyServer(hass, token_manager, port=proxy_port)
+    auth_proxy = AuthProxyServer(hass, token_manager, entry, port=proxy_port)
     hass.data[DOMAIN]["auth_proxy"] = auth_proxy
 
     # Register services
@@ -118,10 +119,16 @@ def _register_services(
         )
         hass.bus.async_fire(EVENT_TOKEN_CREATED, {"token_id": token["token_id"], "label": label})
 
+        # Build an absolute guest URL using the running proxy's base URL.
+        proxy: AuthProxyServer | None = hass.data.get(DOMAIN, {}).get("auth_proxy")
+        guest_url = token["guest_url"]
+        if proxy and proxy.external_url:
+            guest_url = proxy.build_guest_url(token["token_id"], token["_secret"])
+
         return {
             "token_id": token["token_id"],
             "secret": token["_secret"],
-            "guest_url": token["guest_url"],
+            "guest_url": guest_url,
             "expires_at": token["expires_at"],
         }
 

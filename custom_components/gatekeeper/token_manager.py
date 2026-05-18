@@ -124,53 +124,78 @@ class TokenManager:
                 await self._async_save()
         return count
 
-    async def async_validate_token(self, token_id: str, token_secret: str) -> dict[str, Any] | None:
+    async def async_validate_token(
+        self,
+        token_id: str,
+        token_secret: str,
+        *,
+        count_use: bool = True,
+    ) -> dict[str, Any] | None:
         """Validate a token by ID and secret.
 
         Returns the token dict (without hash) if valid, None otherwise.
-        Increments use_count on success.
+
+        When ``count_use`` is True (the default for backwards compatibility),
+        the token's ``use_count`` is incremented on success. Callers that
+        only want to *check* validity (e.g. serving a page or status
+        endpoint) should pass ``count_use=False`` to avoid burning the
+        token's max_uses budget.
+
+        The whole read-modify-write of ``use_count`` is performed under
+        ``self._lock`` to avoid races between concurrent requests.
         """
         token = self._tokens.get(token_id)
         if token is None:
             _LOGGER.warning("Token validation failed: unknown ID %s", token_id)
             return None
 
+        # All mutating checks (expiry-driven deactivate, max_uses exhaustion,
+        # use_count increment) happen under the lock. Pure secret comparison
+        # and the inactive check can happen first.
         if not token.get("is_active", False):
             _LOGGER.warning("Token validation failed: token %s is inactive", token_id)
             return None
 
-        # Check expiry
-        expires_at = token.get("expires_at")
-        if expires_at:
-            try:
-                expires_dt = datetime.fromisoformat(expires_at)
-                if expires_dt < datetime.now(timezone.utc):
-                    _LOGGER.info("Token %s has expired", token_id)
-                    token["is_active"] = False
-                    await self._async_save()
-                    return None
-            except (ValueError, TypeError):
-                _LOGGER.warning("Token %s has invalid expires_at: %s", token_id, expires_at)
-                return None
-
-        # Check secret
+        # Check secret first — fast bail before taking the lock if wrong.
         if not self._verify_secret(token_secret, token.get("token_hash", "")):
             _LOGGER.warning("Token validation failed: invalid secret for %s", token_id)
             return None
 
-        # Check use count
-        if token.get("max_uses", 0) > 0 and token.get("use_count", 0) >= token["max_uses"]:
-            _LOGGER.info("Token %s has exhausted its use limit (%d)", token_id, token["max_uses"])
-            token["is_active"] = False
-            await self._async_save()
-            return None
+        async with self._lock:
+            # Re-fetch under the lock in case it was revoked between checks.
+            token = self._tokens.get(token_id)
+            if token is None or not token.get("is_active", False):
+                return None
 
-        # Increment use count
-        token["use_count"] = token.get("use_count", 0) + 1
-        await self._async_save()
+            # Check expiry
+            expires_at = token.get("expires_at")
+            if expires_at:
+                try:
+                    expires_dt = datetime.fromisoformat(expires_at)
+                    if expires_dt < datetime.now(timezone.utc):
+                        _LOGGER.info("Token %s has expired", token_id)
+                        token["is_active"] = False
+                        await self._async_save()
+                        return None
+                except (ValueError, TypeError):
+                    _LOGGER.warning("Token %s has invalid expires_at: %s", token_id, expires_at)
+                    return None
 
-        # Return safe version (no hash)
-        return self._safe_token(token)
+            # Check use count
+            max_uses = token.get("max_uses", 0)
+            current = token.get("use_count", 0)
+            if max_uses > 0 and current >= max_uses:
+                _LOGGER.info("Token %s has exhausted its use limit (%d)", token_id, max_uses)
+                token["is_active"] = False
+                await self._async_save()
+                return None
+
+            if count_use:
+                token["use_count"] = current + 1
+                await self._async_save()
+
+            # Return safe version (no hash)
+            return self._safe_token(token)
 
     async def async_list_active(self) -> list[dict[str, Any]]:
         """List all active tokens (safe version, no secret/hash)."""
@@ -211,35 +236,66 @@ class TokenManager:
         return "gk_" + secrets.token_urlsafe(TOKEN_ID_LENGTH)
 
     @staticmethod
-    def _build_guest_url(token_id: str, token_secret: str) -> str:
-        """Build the guest access URL for a token. Never stored — computed on demand."""
-        return f"/gatekeeper/guest/{token_id}/{token_secret}"
+    def _build_guest_url(
+        token_id: str, token_secret: str, base_url: str | None = None
+    ) -> str:
+        """Build the guest access URL for a token. Never stored — computed on demand.
+
+        If ``base_url`` is provided, return an absolute URL; otherwise return
+        a path-only URL (legacy behavior, kept for tests / callers that
+        don't have a base).
+        """
+        path = f"/gatekeeper/guest/{token_id}/{token_secret}"
+        if base_url:
+            return f"{base_url.rstrip('/')}{path}"
+        return path
 
     @staticmethod
     def _hash_secret(secret: str) -> str:
-        """Hash a token secret using bcrypt."""
+        """Hash a token secret using bcrypt.
+
+        bcrypt is declared as a hard requirement in ``manifest.json``. The
+        SHA-256 fallback exists only so older tokens hashed without bcrypt
+        remain verifiable; new tokens always use bcrypt and the fallback
+        path logs a loud warning if it is ever hit.
+        """
         if bcrypt:
-            return bcrypt.hashpw(secret.encode("utf-8"), bcrypt.gensalt(rounds=BCRYPT_ROUNDS)).decode("utf-8")
-        # Fallback: SHA-256 with salt (less secure but no bcrypt dep)
+            return bcrypt.hashpw(
+                secret.encode("utf-8"), bcrypt.gensalt(rounds=BCRYPT_ROUNDS)
+            ).decode("utf-8")
+        _LOGGER.warning(
+            "bcrypt is not installed — falling back to SHA-256+salt for token hashing. "
+            "This is less secure; install the integration's declared bcrypt dependency."
+        )
         import hashlib
         salt = secrets.token_hex(16)
         return f"$sha256${salt}${hashlib.sha256((salt + secret).encode('utf-8')).hexdigest()}"
 
     @staticmethod
     def _verify_secret(secret: str, token_hash: str) -> bool:
-        """Verify a secret against its stored hash."""
+        """Verify a secret against its stored hash.
+
+        Comparisons use ``hmac.compare_digest`` so they are constant-time
+        and don't leak information via timing.
+        """
+        import hmac
+
         if not token_hash:
             return False
         if token_hash.startswith("$2"):
-            # bcrypt hash
+            # bcrypt hash — bcrypt.checkpw itself is constant-time.
             if bcrypt:
                 try:
                     return bcrypt.checkpw(secret.encode("utf-8"), token_hash.encode("utf-8"))
                 except Exception:
                     return False
+            _LOGGER.warning(
+                "Token uses bcrypt hash but bcrypt is not installed — cannot verify"
+            )
             return False
         elif token_hash.startswith("$sha256$"):
-            # SHA-256 fallback
+            # SHA-256 fallback (deprecated — only present if a previous run
+            # of this integration didn't have bcrypt available).
             try:
                 parts = token_hash.split("$")
                 if len(parts) != 4:
@@ -247,7 +303,7 @@ class TokenManager:
                 _, _, salt, expected_hash = parts
                 import hashlib
                 actual = hashlib.sha256((salt + secret).encode("utf-8")).hexdigest()
-                return actual == expected_hash
+                return hmac.compare_digest(actual, expected_hash)
             except Exception:
                 return False
         return False
