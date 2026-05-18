@@ -1,10 +1,12 @@
-# Gatekeeper HA
+<p align="center">
+  <img src="docs/logo.png" alt="Gatekeeper HA" width="320">
+</p>
 
-**QR-code-based temporary guest access for Home Assistant.**
+<h1 align="center">Gatekeeper HA</h1>
+
+<p align="center"><strong>QR-code-based temporary guest access for Home Assistant.</strong></p>
 
 A native custom integration + Lovelace card that lets you generate time-limited, scoped guest tokens and serve them via a standalone guest page — no app install required.
-
-![Gatekeeper HA Screenshot](docs/screenshot.png)
 
 ## Features
 
@@ -15,6 +17,10 @@ A native custom integration + Lovelace card that lets you generate time-limited,
 - **📋 Admin Lovelace card** — create/revoke tokens, see remaining time, display QR code, toggle guest mode — all from a card on your dashboard
 - **🧩 Automation blueprints** — shipped with doorbell → auto-token, token expiry alert, and lock-code → guest mode blueprints
 - **⚙️ Fully UI-configurable** — set up via Settings → Devices & Services, no YAML editing
+
+## Preview
+
+![Gatekeeper HA Screenshot](docs/screenshot.png)
 
 ## Quick Start
 
