@@ -6,7 +6,7 @@
 
 <p align="center"><strong>QR-code-based temporary guest access for Home Assistant.</strong></p>
 
-A native custom integration + Lovelace card that lets you generate time-limited, scoped guest tokens and serve them via a standalone guest page — no app install required.
+|A native custom integration + Lovelace card that lets you generate time-limited, scoped guest tokens and serve them via a standalone guest page — no app install required. The [Lovelace card lives in its own repo](https://github.com/rusty4444/gatekeeper-card).
 
 ## Features
 
@@ -36,8 +36,10 @@ Gatekeeper HA is not yet in the default HACS store. For now:
 
 ### 2. Install the Lovelace Card
 
+The [Gatekeeper Guest Portal card](https://github.com/rusty4444/gatekeeper-card) is distributed from its own repository:
+
 1. Go to HACS → Frontend → Custom Repositories
-2. Add: `https://github.com/rusty4444/gatekeeper-ha`
+2. Add: `https://github.com/rusty4444/gatekeeper-card`
 3. Category: Lovelace
 4. Find **Gatekeeper Guest Portal** and install
 5. Add the resource: `/hacsfiles/gatekeeper-card/gatekeeper-card.js`
@@ -88,7 +90,7 @@ Custom integration (custom_components/gatekeeper/)
 ├── services.yaml         # 6 HA services (create/revoke token, activate/deactivate mode, etc.)
 └── ...
 
-Lovelace card (gatekeeper-card/)
+Lovelace card — see [rusty4444/gatekeeper-card](https://github.com/rusty4444/gatekeeper-card)
 ├── src/index.js          # LitElement card — admin panel, QR display, token management
 └── ...
 
@@ -132,8 +134,9 @@ pip install -r requirements-dev.txt
 # Run tests
 pytest tests/
 
-# Build Lovelace card
-cd gatekeeper-card && npm install && npm run build
+# Build Lovelace card (in its own repo)
+# git clone https://github.com/rusty4444/gatekeeper-card
+# cd gatekeeper-card && npm install && npm run build
 ```
 
 ## Requirements
