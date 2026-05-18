@@ -17,10 +17,11 @@ from .const import *
 from .token_manager import TokenManager
 from .guest_mode import GuestModeManager
 from .auth_proxy import AuthProxyServer
+from .sensor import GatekeeperCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = []
+PLATFORMS: list[Platform] = ["sensor", "binary_sensor"]
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -49,6 +50,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Register services
     _register_services(hass, token_manager, guest_mode)
+
+    # Init coordinator for sensor/binary_sensor entities
+    coordinator = GatekeeperCoordinator(hass, entry)
+    await coordinator.async_config_entry_first_refresh()
+    hass.data[DOMAIN]["coordinator"] = coordinator
 
     # Start auth proxy when HA is fully started
     async def _start_proxy(_event=None):
@@ -130,12 +136,18 @@ def _register_services(
         disable_automations = call.data.get(ATTR_DISABLE_AUTOMATIONS, True)
         automation_ids = call.data.get(ATTR_AUTOMATION_ENTITY_IDS, None)
         set_safe_states = call.data.get(ATTR_SET_SAFE_STATES, True)
+        disable_scripts = call.data.get(ATTR_DISABLE_SCRIPTS, True)
+        disable_scenes = call.data.get(ATTR_DISABLE_SCENES, True)
+        safe_state_overrides = call.data.get(ATTR_SAFE_STATE_OVERRIDES, None)
 
         await guest_mode.async_activate(
             auto_disable_hours=auto_disable,
             disable_automations=disable_automations,
             automation_entity_ids=automation_ids,
             set_safe_states=set_safe_states,
+            disable_scripts=disable_scripts,
+            disable_scenes=disable_scenes,
+            safe_state_overrides=safe_state_overrides,
         )
         hass.bus.async_fire(EVENT_MODE_STARTED, {})
         return {"success": True}
@@ -181,6 +193,9 @@ def _register_services(
             vol.Optional(ATTR_DISABLE_AUTOMATIONS, default=True): cv.boolean,
             vol.Optional(ATTR_AUTOMATION_ENTITY_IDS): vol.Any(cv.ensure_list, None),
             vol.Optional(ATTR_SET_SAFE_STATES, default=True): cv.boolean,
+            vol.Optional(ATTR_DISABLE_SCRIPTS, default=True): cv.boolean,
+            vol.Optional(ATTR_DISABLE_SCENES, default=True): cv.boolean,
+            vol.Optional(ATTR_SAFE_STATE_OVERRIDES): vol.Any(dict, None),
         }),
         supports_response=True,
     )

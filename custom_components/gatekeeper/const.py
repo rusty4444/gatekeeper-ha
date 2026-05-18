@@ -44,6 +44,15 @@ ATTR_AUTO_DISABLE_AFTER = "auto_disable_after"  # in hours, 0 = manual only
 ATTR_DISABLE_AUTOMATIONS = "disable_automations"
 ATTR_AUTOMATION_ENTITY_IDS = "automation_entity_ids"
 ATTR_SET_SAFE_STATES = "set_safe_states"
+ATTR_DISABLE_SCRIPTS = "disable_scripts"
+ATTR_DISABLE_SCENES = "disable_scenes"
+ATTR_SAFE_STATE_OVERRIDES = "safe_state_overrides"  # dict of entity_id -> state dict
+
+# Sensor / entity constants
+SENSOR_TOKENS = f"{DOMAIN}_active_tokens"
+SENSOR_SOONEST_EXPIRY = f"{DOMAIN}_soonest_expiry"
+BINARY_SENSOR_MODE = f"{DOMAIN}_mode_active"
+COORDINATOR_UPDATE_INTERVAL = 30  # seconds
 
 # Guest mode states
 MODE_OFF = "off"
