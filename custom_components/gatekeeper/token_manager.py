@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -267,7 +269,6 @@ class TokenManager:
             "bcrypt is not installed — falling back to SHA-256+salt for token hashing. "
             "This is less secure; install the integration's declared bcrypt dependency."
         )
-        import hashlib
         salt = secrets.token_hex(16)
         return f"$sha256${salt}${hashlib.sha256((salt + secret).encode('utf-8')).hexdigest()}"
 
@@ -278,7 +279,6 @@ class TokenManager:
         Comparisons use ``hmac.compare_digest`` so they are constant-time
         and don't leak information via timing.
         """
-        import hmac
 
         if not token_hash:
             return False
@@ -301,7 +301,6 @@ class TokenManager:
                 if len(parts) != 4:
                     return False
                 _, _, salt, expected_hash = parts
-                import hashlib
                 actual = hashlib.sha256((salt + secret).encode("utf-8")).hexdigest()
                 return hmac.compare_digest(actual, expected_hash)
             except Exception:
@@ -310,8 +309,13 @@ class TokenManager:
 
     @staticmethod
     def _safe_token(token: dict[str, Any]) -> dict[str, Any]:
-        """Return a token dict with sensitive fields removed."""
-        return {
-            k: v for k, v in token.items()
-            if k not in ("token_hash",)
+        """Return a token dict with sensitive fields removed.
+
+        Strips the hash, scope configuration, and service-level details
+        that should not be exposed to guest-facing endpoints.
+        """
+        safe_keys = {
+            "token_id", "label", "created_at", "expires_at",
+            "max_uses", "use_count", "is_active",
         }
+        return {k: v for k, v in token.items() if k in safe_keys}

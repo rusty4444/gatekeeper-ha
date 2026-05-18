@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 
 from homeassistant.components.binary_sensor import (
-    BinarySensorDeviceClass,
     BinarySensorEntity,
 )
 from homeassistant.config_entries import ConfigEntry
@@ -44,7 +43,6 @@ class GuestModeActiveBinarySensor(CoordinatorEntity, BinarySensorEntity):
     _attr_name = "Guest mode active"
     _attr_unique_id = BINARY_SENSOR_MODE
     _attr_icon = "mdi:shield-account"
-    _attr_device_class = BinarySensorDeviceClass.SAFETY
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(

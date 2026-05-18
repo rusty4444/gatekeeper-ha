@@ -177,8 +177,10 @@ GUEST_PAGE_HTML = """<!DOCTYPE html>
 
       if (status.expires_at) {
         // expires_at is sent as a UTC ISO8601 string by the server; use it directly.
+        // Clear any previous interval so render() doesn't leak timers.
+        if (window._gatekeeperTimer) clearInterval(window._gatekeeperTimer);
         const expires = new Date(status.expires_at).getTime();
-        setInterval(function() {
+        window._gatekeeperTimer = setInterval(function() {
           const now = new Date().getTime();
           const diff = Math.max(0, expires - now);
           const h = Math.floor(diff / 3600000);

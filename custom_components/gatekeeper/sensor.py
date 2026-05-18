@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -34,7 +34,10 @@ async def async_setup_entry(
     # Reuse the coordinator created in __init__.async_setup_entry.
     # Don't instantiate a second one — that would double-poll and let
     # sensor/binary_sensor entities drift out of sync.
-    coordinator = hass.data[DOMAIN]["coordinator"]
+    coordinator = hass.data.get(DOMAIN, {}).get("coordinator")
+    if not coordinator:
+        _LOGGER.warning("Coordinator not found for sensor setup")
+        return
 
     async_add_entities([
         GatekeeperActiveTokensSensor(coordinator, entry),
@@ -113,9 +116,13 @@ class GatekeeperActiveTokensSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict:
-        """Return token list as attributes."""
+        """Return token list as attributes (IDs + labels only to avoid state bloat)."""
+        tokens = self.coordinator.data.get("tokens", [])
         return {
-            "tokens": self.coordinator.data.get("tokens", []),
+            "tokens": [
+                {"token_id": t.get("token_id"), "label": t.get("label")}
+                for t in tokens
+            ],
         }
 
 
@@ -143,9 +150,13 @@ class GatekeeperSoonestExpirySensor(CoordinatorEntity, SensorEntity):
     def native_value(self) -> datetime | None:
         """Return the soonest expiry as a datetime."""
         soonest = self.coordinator.data.get("soonest_expiry")
-        if soonest:
-            try:
-                return datetime.fromisoformat(soonest)
-            except (ValueError, TypeError):
-                return None
-        return None
+        if soonest is None:
+            return None
+        # soonest_expiry may be an ISO string (from token manager) or
+        # already a datetime object (if token expires_at was stored as one).
+        if isinstance(soonest, datetime):
+            return soonest
+        try:
+            return datetime.fromisoformat(soonest)
+        except (ValueError, TypeError):
+            return None

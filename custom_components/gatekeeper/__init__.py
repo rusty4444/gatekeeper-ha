@@ -118,6 +118,22 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Migrate config entry version."""
     _LOGGER.debug("Migrating config entry from version %s", entry.version)
+
+    if entry.version > GATEKEEPER_CONFIG_VERSION:
+        # Future versions should never need migration to a past version
+        return False
+
+    if entry.version == 1:
+        # Version 1 -> 2: add defaults for any new options introduced since split
+        new_options = {**entry.options}
+        new_options.setdefault("wifi_ssid", "")
+        new_options.setdefault("wifi_password", "")
+        new_options.setdefault("safe_state_lights", "off")
+        new_options.setdefault("safe_state_locks", "locked")
+        new_options.setdefault("safe_state_climate", "off")
+        hass.config_entries.async_update_entry(entry, options=new_options, version=GATEKEEPER_CONFIG_VERSION)
+
+    _LOGGER.debug("Migration to version %s complete", GATEKEEPER_CONFIG_VERSION)
     return True
 
 

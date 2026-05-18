@@ -286,25 +286,22 @@ class GuestModeManager:
             "switch": ("switch", "turn_off"),
         }
 
-        for state in self.hass.states.async_all():
-            domain = state.domain
-            if domain not in defaults:
-                continue
-            entity_id = state.entity_id
-            config = defaults[domain]
-            service = config[1]
-            service_data = {"entity_id": entity_id}
-            if len(config) > 2:
-                service_data.update(config[2])
-            # Only apply if not already in desired state
-            try:
-                await self.hass.services.async_call(
-                    domain, service,
-                    service_data,
-                    blocking=False,
-                )
-            except Exception as exc:
-                _LOGGER.debug("Safe state skip %s: %s", entity_id, exc)
+        for domain, config in defaults.items():
+            for state in self.hass.states.async_all(domain):
+                entity_id = state.entity_id
+                service = config[1]
+                service_data = {"entity_id": entity_id}
+                if len(config) > 2:
+                    service_data.update(config[2])
+                # Only apply if not already in desired state
+                try:
+                    await self.hass.services.async_call(
+                        domain, service,
+                        service_data,
+                        blocking=False,
+                    )
+                except Exception as exc:
+                    _LOGGER.debug("Safe state skip %s: %s", entity_id, exc)
 
     async def _persist_state(self) -> None:
         """Persist current mode state."""
