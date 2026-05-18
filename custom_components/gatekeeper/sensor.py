@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -31,8 +31,10 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Gatekeeper sensor entities."""
-    coordinator = GatekeeperCoordinator(hass, entry)
-    await coordinator.async_config_entry_first_refresh()
+    # Reuse the coordinator created in __init__.async_setup_entry.
+    # Don't instantiate a second one — that would double-poll and let
+    # sensor/binary_sensor entities drift out of sync.
+    coordinator = hass.data[DOMAIN]["coordinator"]
 
     async_add_entities([
         GatekeeperActiveTokensSensor(coordinator, entry),
@@ -48,7 +50,7 @@ class GatekeeperCoordinator(DataUpdateCoordinator):
             hass,
             _LOGGER,
             name="Gatekeeper",
-            update_interval=COORDINATOR_UPDATE_INTERVAL,
+            update_interval=timedelta(seconds=COORDINATOR_UPDATE_INTERVAL),
         )
         self.entry = entry
 
