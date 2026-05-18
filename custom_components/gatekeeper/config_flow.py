@@ -11,17 +11,6 @@ from homeassistant import config_entries
 from homeassistant.config_entries import ConfigFlowResult, OptionsFlowWithConfigEntry
 from homeassistant.core import callback
 from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers.selector import (
-    BooleanSelector,
-    NumberSelector,
-    NumberSelectorConfig,
-    SelectSelector,
-    SelectSelectorConfig,
-    SelectSelectorMode,
-    TextSelector,
-    TextSelectorConfig,
-    TextSelectorType,
-)
 
 from .const import *
 
@@ -69,10 +58,6 @@ class GatekeeperConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "default_expiry_hours": user_input["default_expiry_hours"],
             },
         )
-
-    async def async_step_import(self, import_data: dict[str, Any]) -> ConfigFlowResult:
-        """Import from YAML config."""
-        return await self.async_step_user(import_data)
 
     @staticmethod
     @callback

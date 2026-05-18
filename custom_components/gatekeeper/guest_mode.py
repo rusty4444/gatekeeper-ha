@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-import copy
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
 from .const import *
@@ -156,7 +155,7 @@ class GuestModeManager:
                 await self.hass.services.async_call(
                     domain, "turn_off",
                     {"entity_id": entity_id},
-                    blocking=True,
+                    blocking=False,
                 )
                 disabled_count += 1
             except Exception as exc:
@@ -178,7 +177,7 @@ class GuestModeManager:
                     await self.hass.services.async_call(
                         "automation", "turn_on",
                         {"entity_id": entity_id},
-                        blocking=True,
+                        blocking=False,
                     )
                     restored_count += 1
                 except Exception as exc:

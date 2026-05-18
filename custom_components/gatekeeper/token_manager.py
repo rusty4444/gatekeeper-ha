@@ -57,7 +57,8 @@ class TokenManager:
     ) -> dict[str, Any]:
         """Create a new guest token.
 
-        Returns the token dict including the one-time ``_secret`` field.
+        Returns a dict with token info plus the one-time ``_secret`` and ``guest_url``.
+        Neither ``_secret`` nor ``guest_url`` is persisted in storage.
         """
         if scoped_entities is None:
             scoped_entities = ["light.*"]
@@ -88,14 +89,16 @@ class TokenManager:
             self._tokens[token_id] = token
             await self._async_save()
 
-        # Build guest URL
-        guest_url = f"/gatekeeper/guest/{token_id}/{token_secret}"
-
         _LOGGER.info("Created token '%s' (ID: %s) expiring at %s", label, token_id, expires_at)
 
-        token["_secret"] = token_secret
-        token["guest_url"] = guest_url
-        return token
+        # Return guest_url and secret as top-level keys, NOT inside the stored token dict
+        return {
+            "token_id": token_id,
+            "_secret": token_secret,
+            "guest_url": self._build_guest_url(token_id, token_secret),
+            "expires_at": expires_at,
+            "label": label,
+        }
 
     async def async_revoke_token(self, token_id: str) -> bool:
         """Revoke a token by ID."""
@@ -208,6 +211,11 @@ class TokenManager:
         return "gk_" + secrets.token_urlsafe(TOKEN_ID_LENGTH)
 
     @staticmethod
+    def _build_guest_url(token_id: str, token_secret: str) -> str:
+        """Build the guest access URL for a token. Never stored — computed on demand."""
+        return f"/gatekeeper/guest/{token_id}/{token_secret}"
+
+    @staticmethod
     def _hash_secret(secret: str) -> str:
         """Hash a token secret using bcrypt."""
         if bcrypt:
@@ -249,5 +257,5 @@ class TokenManager:
         """Return a token dict with sensitive fields removed."""
         return {
             k: v for k, v in token.items()
-            if k not in ("token_hash", "_secret")
+            if k not in ("token_hash",)
         }

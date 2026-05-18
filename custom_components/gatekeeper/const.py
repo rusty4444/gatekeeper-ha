@@ -8,7 +8,6 @@ STORAGE_KEY = f"{DOMAIN}.tokens"
 STORAGE_VERSION = 1
 
 # Config flow defaults
-DEFAULT_PORT = 8920
 DEFAULT_EXPIRY_HOURS = 24
 DEFAULT_AUTO_DISABLE_HOURS = 48
 DEFAULT_GUEST_PAGE_PORT = 8921
@@ -23,7 +22,6 @@ EVENT_MODE_STARTED = f"{DOMAIN}_mode_started"
 EVENT_MODE_ENDED = f"{DOMAIN}_mode_ended"
 EVENT_TOKEN_CREATED = f"{DOMAIN}_token_created"
 EVENT_TOKEN_REVOKED = f"{DOMAIN}_token_revoked"
-EVENT_TOKEN_EXPIRING = f"{DOMAIN}_token_expiring"
 
 # Services
 SERVICE_CREATE_TOKEN = "create_token"
@@ -50,7 +48,3 @@ ATTR_SET_SAFE_STATES = "set_safe_states"
 # Guest mode states
 MODE_OFF = "off"
 MODE_ON = "on"
-
-# API paths
-API_GUEST_PREFIX = "/api/gatekeeper/guest"
-API_ADMIN_PREFIX = "/api/gatekeeper/admin"
