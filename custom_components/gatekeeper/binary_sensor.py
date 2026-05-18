@@ -62,3 +62,10 @@ class GuestModeActiveBinarySensor(CoordinatorEntity, BinarySensorEntity):
     def is_on(self) -> bool:
         """Return True if guest mode is active."""
         return self.coordinator.data.get("mode_active", False)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Expose remaining seconds so the frontend card can render a countdown."""
+        return {
+            "mode_remaining_seconds": self.coordinator.data.get("mode_remaining"),
+        }

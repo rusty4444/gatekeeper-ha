@@ -1,3 +1,6 @@
-pytest
-pytest-asyncio
+pytest>=7
+pytest-asyncio>=0.23
 pytest-cov
+# Provides HA-native fixtures (hass, MockConfigEntry, hass_storage, etc.)
+# Pin to a release that matches the homeassistant minimum in manifest.json.
+pytest-homeassistant-custom-component>=0.13.180
