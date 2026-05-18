@@ -100,6 +100,26 @@ class GatekeeperOptionsFlow(OptionsFlowWithConfigEntry):
                         "default_guest_mode_duration_hours",
                         default=current.get("default_guest_mode_duration_hours", 48),
                     ): vol.All(vol.Coerce(int), vol.Range(min=0, max=8760)),
+                    vol.Optional(
+                        "disable_scripts_on_mode",
+                        default=current.get("disable_scripts_on_mode", True),
+                    ): cv.boolean,
+                    vol.Optional(
+                        "disable_scenes_on_mode",
+                        default=current.get("disable_scenes_on_mode", True),
+                    ): cv.boolean,
+                    vol.Optional(
+                        "apply_safe_states",
+                        default=current.get("apply_safe_states", True),
+                    ): cv.boolean,
+                    vol.Optional(
+                        "wifi_ssid",
+                        default=current.get("wifi_ssid", ""),
+                    ): cv.string,
+                    vol.Optional(
+                        "wifi_password",
+                        default=current.get("wifi_password", ""),
+                    ): cv.string,
                 }
             ),
             last_step=True,

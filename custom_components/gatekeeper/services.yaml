@@ -96,6 +96,26 @@ activate_mode:
       default: true
       selector:
         boolean:
+    disable_scripts:
+      name: Disable scripts
+      description: Whether to disable all scripts.
+      required: false
+      default: true
+      selector:
+        boolean:
+    disable_scenes:
+      name: Disable scenes
+      description: Whether to disable all scenes.
+      required: false
+      default: true
+      selector:
+        boolean:
+    safe_state_overrides:
+      name: Safe state overrides
+      description: "Custom entity states to set (e.g. {\"light.kitchen\": {\"state\": \"on\", \"brightness\": 50}})"
+      required: false
+      selector:
+        object:
 
 deactivate_mode:
   name: Deactivate guest mode

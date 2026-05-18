@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gatekeeper HA - Screenshot</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #111;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 600px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    padding: 40px;
+  }
+  .card {
+    background: #1a1a1a;
+    border-radius: 16px;
+    padding: 28px;
+    width: 560px;
+    color: #eee;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+  }
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+  }
+  .card-header h1 { font-size: 1.3rem; font-weight: 600; }
+  .mode-toggle {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.85rem;
+    color: #999;
+  }
+  .switch-track {
+    width: 44px; height: 24px;
+    background: #333;
+    border-radius: 12px;
+    position: relative;
+    cursor: pointer;
+  }
+  .switch-thumb {
+    position: absolute;
+    width: 20px; height: 20px;
+    background: #666;
+    border-radius: 50%;
+    top: 2px; left: 2px;
+    transition: all 0.3s;
+  }
+  .switch-track.active { background: #2e7d32; }
+  .switch-track.active .switch-thumb { left: 22px; background: #a5d6a7; }
+  .mode-banner {
+    background: #1b5e20; color: #a5d6a7;
+    padding: 10px 16px; border-radius: 10px;
+    margin-bottom: 20px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    display: flex; justify-content: space-between;
+  }
+  .mode-banner.inactive { background: #2a2a2a; color: #666; }
+  .section-title {
+    font-size: 0.95rem; font-weight: 600;
+    margin-bottom: 12px;
+  }
+  .token-list { margin-bottom: 20px; }
+  .token-item {
+    display: flex; justify-content: space-between; align-items: center;
+    background: #222; border-radius: 10px;
+    padding: 12px 16px; margin-bottom: 8px;
+    border-left: 3px solid;
+  }
+  .token-item.green { border-color: #4caf50; }
+  .token-item.yellow { border-color: #ff9800; }
+  .token-item.red { border-color: #f44336; }
+  .token-label { font-weight: 500; }
+  .token-meta { font-size: 0.8rem; color: #888; margin-top: 2px; }
+  .revoke-btn {
+    padding: 6px 14px; border: none; border-radius: 6px;
+    background: #3a3a3a; color: #ccc; font-size: 0.8rem;
+    cursor: pointer;
+  }
+  .qr-section {
+    text-align: center; padding: 16px 0;
+    border-top: 1px solid #2a2a2a; margin-top: 12px;
+  }
+  .qr-section p { font-size: 0.85rem; color: #888; margin-bottom: 12px; }
+  .qr-placeholder {
+    width: 140px; height: 140px;
+    background: #fff;
+    margin: 0 auto 12px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.7rem; color: #111;
+    position: relative;
+  }
+  .qr-placeholder::after {
+    content: '';
+    position: absolute;
+    width: 100px; height: 100px;
+    background: repeating-linear-gradient(
+      90deg, #000 0, #000 4px, transparent 4px, transparent 8px
+    ),
+    repeating-linear-gradient(
+      0deg, #000 0, #000 4px, transparent 4px, transparent 8px
+    );
+    opacity: 0.8;
+  }
+  .new-token-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 8px 18px; background: #6c5ce7; color: #fff;
+    border: none; border-radius: 8px; font-size: 0.85rem;
+    font-weight: 500; cursor: pointer;
+  }
+  .header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="card-header">
+    <h1>🏠 Guest Access</h1>
+    <div class="mode-toggle">
+      <span>Guest Mode</span>
+      <div class="switch-track active"><div class="switch-thumb"></div></div>
+    </div>
+  </div>
+
+  <div class="mode-banner">
+    <span>Guest mode active</span>
+    <span>47h 22m remaining</span>
+  </div>
+
+  <div class="header-row">
+    <div class="section-title">Active Tokens (2)</div>
+    <button class="new-token-btn">+ New Token</button>
+  </div>
+
+  <div class="token-list">
+    <div class="token-item green">
+      <div>
+        <div class="token-label">Plumber Wed</div>
+        <div class="token-meta">Expires 3h 15m · 0 uses</div>
+      </div>
+      <button class="revoke-btn">Revoke</button>
+    </div>
+    <div class="token-item yellow">
+      <div>
+        <div class="token-label">Uncle Bob weekend</div>
+        <div class="token-meta">Expires 26h 40m · 5 uses</div>
+      </div>
+      <button class="revoke-btn">Revoke</button>
+    </div>
+  </div>
+
+  <div class="qr-section">
+    <p>Share this QR for guest access</p>
+    <div class="qr-placeholder"></div>
+  </div>
+</div>
+</body>
+</html>

@@ -4,6 +4,8 @@
 
 A native custom integration + Lovelace card that lets you generate time-limited, scoped guest tokens and serve them via a standalone guest page — no app install required.
 
+![Gatekeeper HA Screenshot](docs/screenshot.png)
+
 ## Features
 
 - **🔑 Scoped guest tokens** — generate time-limited URLs that grant access only to specific entities, domains, and services
