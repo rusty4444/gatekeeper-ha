@@ -1,0 +1,113 @@
+create_token:
+  name: Create guest token
+  description: Generate a time-limited access token for a guest.
+  fields:
+    label:
+      name: Label
+      description: Human-readable label for this token (e.g. "Plumber Wed")
+      required: false
+      default: "Guest"
+      selector:
+        text:
+    duration:
+      name: Duration (hours)
+      description: Number of hours until the token expires.
+      required: false
+      default: 24
+      selector:
+        number:
+          min: 1
+          max: 8760
+          unit_of_measurement: hours
+    scoped_entities:
+      name: Scoped entities
+      description: Entity ID patterns to grant access to (e.g. "light.*", "lock.front_door")
+      required: false
+      example: '["light.*", "lock.front_door", "climate.*"]'
+      selector:
+        object:
+    scoped_domains:
+      name: Scoped domains
+      description: Domain names to grant access to (e.g. "light", "climate")
+      required: false
+      example: '["light", "lock", "climate"]'
+      selector:
+        object:
+    allowed_services:
+      name: Allowed services
+      description: Specific service calls to allow (e.g. "light.turn_on")
+      required: false
+      example: '["light.turn_on", "light.turn_off", "lock.unlock"]'
+      selector:
+        object:
+    max_uses:
+      name: Max uses
+      description: Maximum number of API calls this token can make (0 = unlimited).
+      required: false
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 10000
+
+revoke_token:
+  name: Revoke guest token
+  description: Immediately invalidate a guest access token.
+  fields:
+    token_id:
+      name: Token ID
+      description: The token_id to revoke.
+      required: true
+      selector:
+        text:
+
+activate_mode:
+  name: Activate guest mode
+  description: Enable guest mode — disable selected automations, set safe states.
+  fields:
+    auto_disable_after:
+      name: Auto-disable after (hours)
+      description: Automatically disable guest mode after this many hours (0 = manual only).
+      required: false
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 8760
+    disable_automations:
+      name: Disable automations
+      description: Whether to disable selected automations.
+      required: false
+      default: true
+      selector:
+        boolean:
+    automation_entity_ids:
+      name: Automation entity IDs
+      description: Specific automations to disable. Empty = use config default list.
+      required: false
+      selector:
+        entity:
+          domain: automation
+          multiple: true
+    set_safe_states:
+      name: Set safe states
+      description: Whether to set entities to safe default states.
+      required: false
+      default: true
+      selector:
+        boolean:
+
+deactivate_mode:
+  name: Deactivate guest mode
+  description: Disable guest mode — restore automations and revoke all tokens.
+  fields: {}
+
+get_tokens:
+  name: Get active tokens
+  description: List all currently active guest tokens.
+  fields: {}
+
+get_guest_url:
+  name: Get guest access URL
+  description: Return the current guest page URL (for QR generation).
+  fields: {}

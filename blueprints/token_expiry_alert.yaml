@@ -1,0 +1,55 @@
+blueprint:
+  name: Gatekeeper — Token expiry alert
+  description: Get notified when a guest token is about to expire
+  domain: automation
+  source_url: https://github.com/rusty4444/gatekeeper-ha/blob/main/blueprints/token_expiry_alert.yaml
+  input:
+    expiry_threshold:
+      name: Expiry threshold (minutes)
+      description: Send alert when token has less than this many minutes remaining
+      default: 30
+      selector:
+        number:
+          min: 5
+          max: 1440
+          unit_of_measurement: minutes
+    notification_device:
+      name: Notification device
+      description: Mobile device to send the alert to
+      default: []
+      selector:
+        device:
+          integration: mobile_app
+          multiple: true
+
+trigger:
+  - platform: time_pattern
+    minutes: "/15"
+
+condition:
+  - condition: template
+    value_template: >
+      {% set tokens = state_attr('sensor.gatekeeper_active_tokens', 'tokens') or [] %}
+      {% set threshold = expiry_threshold | int %}
+      {% set alert = false %}
+      {% for token in tokens %}
+        {% if token.is_active and token.expires_at %}
+          {% set expires = as_timestamp(token.expires_at) %}
+          {% set remaining = (expires - as_timestamp(now())) / 60 %}
+          {% if remaining > 0 and remaining < threshold %}
+            {% set alert = true %}
+          {% endif %}
+        {% endif %}
+      {% endfor %}
+      {{ alert }}
+
+action:
+  - service: notify.mobile_app
+    target:
+      device_id: !input notification_device
+    data:
+      title: "Guest token expiring soon"
+      message: >
+        {% set threshold = expiry_threshold | int %}
+        One or more guest tokens expire within {{ threshold }} minutes.
+        Revoke or extend at your Gatekeeper dashboard.

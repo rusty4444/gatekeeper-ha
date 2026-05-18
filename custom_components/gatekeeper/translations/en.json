@@ -1,0 +1,57 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Gatekeeper HA",
+        "description": "Configure the guest access portal.\n\n- **Guest page port**: Port for the standalone guest web interface (default: {port})\n- **Default expiry hours**: How long new guest tokens last by default (default: {expiry})",
+        "data": {
+          "guest_port": "Guest page port",
+          "default_expiry_hours": "Default expiry (hours)"
+        }
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Only one instance of Gatekeeper HA is allowed."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Gatekeeper HA Options",
+        "description": "Configure Gatekeeper HA behavior.",
+        "data": {
+          "guest_port": "Guest page port",
+          "default_expiry_hours": "Default token expiry (hours)",
+          "default_auto_disable_hours": "Auto-disable after (hours, 0 = manual)",
+          "default_guest_mode_duration_hours": "Default guest mode duration (hours, 0 = manual)"
+        }
+      }
+    }
+  },
+  "services": {
+    "create_token": {
+      "name": "Create guest token",
+      "description": "Generate a time-limited access token for a guest."
+    },
+    "revoke_token": {
+      "name": "Revoke guest token",
+      "description": "Immediately invalidate a guest access token."
+    },
+    "activate_mode": {
+      "name": "Activate guest mode",
+      "description": "Enable guest mode — disable selected automations and set safe states."
+    },
+    "deactivate_mode": {
+      "name": "Deactivate guest mode",
+      "description": "Disable guest mode — restore automations and revoke all tokens."
+    },
+    "get_tokens": {
+      "name": "Get active tokens",
+      "description": "List all currently active guest tokens."
+    },
+    "get_guest_url": {
+      "name": "Get guest URL",
+      "description": "Return the current guest page URL for QR generation."
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "domain": "gatekeeper",
+  "name": "Gatekeeper HA",
+  "codeowners": ["@rusty4444"],
+  "config_flow": true,
+  "dependencies": ["http"],
+  "documentation": "https://github.com/rusty4444/gatekeeper-ha",
+  "integration_type": "hub",
+  "iot_class": "local_push",
+  "requirements": ["bcrypt==4.2.1"],
+  "version": "0.1.0",
+  "issue_tracker": "https://github.com/rusty4444/gatekeeper-ha/issues",
+  "loggers": ["custom_components.gatekeeper"]
+}

@@ -1,0 +1,16 @@
+{
+  "name": "gatekeeper-card",
+  "version": "0.1.0",
+  "description": "Gatekeeper HA — Guest access management Lovelace card",
+  "main": "src/index.js",
+  "scripts": {
+    "build": "rollup -c",
+    "watch": "rollup -c --watch",
+    "lint": "eslint src/"
+  },
+  "devDependencies": {
+    "@rollup/plugin-node-resolve": "^15.0.0",
+    "@rollup/plugin-terser": "^0.4.0",
+    "rollup": "^4.0.0"
+  }
+}

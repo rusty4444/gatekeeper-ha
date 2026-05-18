@@ -1,0 +1,50 @@
+blueprint:
+  name: Gatekeeper — Guest mode from lock code
+  description: Activate guest mode when a specific lock code is entered
+  domain: automation
+  source_url: https://github.com/rusty4444/gatekeeper-ha/blob/main/blueprints/guest_mode_lock.yaml
+  input:
+    lock_entity:
+      name: Smart lock
+      description: The lock that will trigger guest mode
+      selector:
+        entity:
+          domain: lock
+    lock_code:
+      name: Guest lock code
+      description: The access code that triggers guest mode (e.g. "5678")
+      default: "5678"
+      selector:
+        text:
+    auto_disable_hours:
+      name: Auto-disable after (hours)
+      description: Automatically disable guest mode after this many hours
+      default: 72
+      selector:
+        number:
+          min: 1
+          max: 8760
+          unit_of_measurement: hours
+
+trigger:
+  - platform: state
+    entity_id: !input lock_entity
+    to: "unlocked"
+
+condition:
+  - condition: template
+    value_template: >
+      {% set code = state_attr(lock_entity, 'code') or '' %}
+      {{ lock_code in code }}
+
+action:
+  - service: gatekeeper.activate_mode
+    data:
+      auto_disable_after: !input auto_disable_hours
+      disable_automations: true
+      set_safe_states: true
+
+  - service: notify.mobile_app
+    data:
+      title: "Guest mode activated"
+      message: "Guest mode was triggered by lock code entry. Auto-disables in {{ auto_disable_hours }} hours."

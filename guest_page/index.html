@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Guest — Gatekeeper</title>
+<style>
+  :root { --bg: #121212; --card: #1e1e1e; --text: #eee; --accent: #6c5ce7; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+         background: var(--bg); color: var(--text); min-height: 100vh; }
+  .container { max-width: 480px; margin: 0 auto; padding: 16px; }
+  .header { text-align: center; padding: 24px 0 16px; }
+  .header h1 { font-size: 1.4rem; font-weight: 600; }
+  .timer-bar { background: var(--card); border-radius: 12px; padding: 12px 16px;
+               margin-bottom: 16px; display: flex; justify-content: space-between; }
+  .timer-bar .label { opacity: 0.7; font-size: 0.85rem; }
+  .timer-bar .time { font-weight: 600; color: var(--accent); }
+  .entity-card { background: var(--card); border-radius: 12px; padding: 16px;
+                 margin-bottom: 12px; display: flex; justify-content: space-between;
+                 align-items: center; }
+  .entity-card .name { font-weight: 500; }
+  .entity-card .state { font-size: 0.85rem; opacity: 0.7; }
+  .entity-card .controls { display: flex; gap: 8px; }
+  .btn { padding: 8px 16px; border: none; border-radius: 8px; font-size: 0.85rem;
+         font-weight: 500; cursor: pointer; transition: all 0.2s; }
+  .btn-on { background: var(--accent); color: #fff; }
+  .btn-off { background: #333; color: #aaa; }
+  .btn:active { transform: scale(0.95); }
+  .wifi-info { background: var(--card); border-radius: 12px; padding: 16px; margin-top: 16px; }
+  .wifi-info h3 { font-size: 0.9rem; opacity: 0.7; margin-bottom: 8px; }
+  .wifi-info .detail { display: flex; justify-content: space-between; padding: 4px 0; }
+  .error { color: #ff6b6b; text-align: center; padding: 16px; }
+  .loading { text-align: center; padding: 48px; opacity: 0.5; }
+</style>
+</head>
+<body>
+<div class="container" id="app">
+  <div class="loading">Loading guest controls...</div>
+</div>
+<script>
+(function() {
+  const pathParts = window.location.pathname.split('/');
+  const tokenId = pathParts[3];
+  const tokenSecret = pathParts[4];
+  const BASE = '/api/gatekeeper/guest/' + tokenId + '/' + tokenSecret;
+
+  async function callService(domain, service, entityId, data) {
+    const resp = await fetch(BASE + '/call_service', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ domain, service, entity_id: entityId, data: data || {} })
+    });
+    return resp.json();
+  }
+
+  async function fetchEntities() {
+    const resp = await fetch(BASE + '/entities');
+    return resp.json();
+  }
+
+  async function fetchStatus() {
+    const resp = await fetch(BASE + '/status');
+    return resp.json();
+  }
+
+  async function render() {
+    const app = document.getElementById('app');
+    try {
+      const status = await fetchStatus();
+      const entities = await fetchEntities();
+
+      let html = '<div class="header"><h1>Guest Controls</h1></div>';
+      html += '<div class="timer-bar"><span class="label">Session expires</span><span class="time" id="timer">' +
+              (status.expires_in || '--') + '</span></div>';
+
+      html += '<div id="entities">';
+      entities.forEach(e => {
+        const isOn = e.state === 'on' || e.state === 'open';
+        html += '<div class="entity-card">';
+        html += '<div><div class="name">' + (e.friendly_name || e.entity_id) + '</div>';
+        html += '<div class="state">' + (e.state || 'unknown') + '</div></div>';
+        html += '<div class="controls">';
+        html += '<button class="btn btn-on" onclick="toggleEntity(\'' + e.entity_id + '\', \'on\')">On</button>';
+        html += '<button class="btn btn-off" onclick="toggleEntity(\'' + e.entity_id + '\', \'off\')">Off</button>';
+        if (e.domain === 'lock') {
+          html += '<button class="btn btn-on" onclick="toggleEntity(\'' + e.entity_id + '\', \'unlock\')">Unlock</button>';
+        }
+        html += '</div></div>';
+      });
+      html += '</div>';
+
+      html += '<div class="wifi-info"><h3>WiFi &amp; House Info</h3>';
+      html += '<div class="detail"><span>Network</span><span>' + (status.wifi_ssid || '--') + '</span></div>';
+      html += '<div class="detail"><span>Password</span><span>' + (status.wifi_password || '--') + '</span></div>';
+      html += '</div>';
+
+      app.innerHTML = html;
+
+      if (status.expires_at) {
+        const expires = new Date(status.expires_at + 'Z').getTime();
+        setInterval(function() {
+          const now = new Date().getTime();
+          const diff = Math.max(0, expires - now);
+          const h = Math.floor(diff / 3600000);
+          const m = Math.floor((diff % 3600000) / 60000);
+          document.getElementById('timer').textContent = h + 'h ' + m + 'm';
+        }, 10000);
+      }
+    } catch(e) {
+      app.innerHTML = '<div class="error">Failed to load guest controls. Invalid or expired link.</div>';
+    }
+  }
+
+  window.toggleEntity = async function(entityId, action) {
+    const domain = entityId.split('.')[0];
+    let service = action;
+    if (action === 'on') service = 'turn_on';
+    else if (action === 'off') service = 'turn_off';
+    else if (action === 'unlock') service = 'unlock';
+    await callService(domain, service, entityId);
+    render();
+  };
+
+  render();
+})();
+</script>
+</body>
+</html>

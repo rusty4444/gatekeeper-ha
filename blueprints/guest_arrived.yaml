@@ -1,0 +1,62 @@
+blueprint:
+  name: Gatekeeper — Guest token on doorbell
+  description: Auto-create a guest token when the doorbell rings, display QR on tablet
+  domain: automation
+  source_url: https://github.com/rusty4444/gatekeeper-ha/blob/main/blueprints/guest_arrived.yaml
+  input:
+    doorbell_entity:
+      name: Doorbell entity
+      description: The binary sensor that triggers when someone rings
+      selector:
+        entity:
+          domain: binary_sensor
+    token_duration:
+      name: Token duration (hours)
+      description: How long the guest access link stays valid
+      default: 4
+      selector:
+        number:
+          min: 1
+          max: 168
+          unit_of_measurement: hours
+    notification_device:
+      name: Notification device
+      description: Mobile device to send the token link to
+      default: []
+      selector:
+        device:
+          integration: mobile_app
+          multiple: true
+
+trigger:
+  - platform: state
+    entity_id: !input doorbell_entity
+    to: "on"
+
+action:
+  - service: gatekeeper.create_token
+    data:
+      label: "Doorbell guest"
+      duration: !input token_duration
+      scoped_entities:
+        - "lock.*"
+        - "light.*"
+      scoped_domains:
+        - lock
+        - light
+      allowed_services:
+        - lock.unlock
+        - light.turn_on
+        - light.turn_off
+    response_variable: token_result
+
+  - if:
+      - condition: template
+        value_template: "{{ token_result is defined }}"
+    then:
+      - service: notify.mobile_app
+        target:
+          device_id: !input notification_device
+        data:
+          title: "Doorbell guest link created"
+          message: "Guest link expires in {{ token_duration }} hours. Share: {{ token_result['guest_url'] }}"
