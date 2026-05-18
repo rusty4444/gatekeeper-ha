@@ -2,27 +2,21 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Callable
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.storage import Store
 
-from .const import *
+from .const import DOMAIN, MODE_OFF, MODE_ON
 from .token_manager import TokenManager
 
 _LOGGER = logging.getLogger(__name__)
 
 STORAGE_KEY_MODE = f"{DOMAIN}.mode"
 STORAGE_KEY_SNAPSHOT = f"{DOMAIN}.snapshot"
-
-DOMAINS_TO_SNAPSHOT = {
-    "automation": "automation_entity_ids",
-    "script": "disable_scripts",
-    "scene": "disable_scenes",
-}
 
 
 class GuestModeManager:
@@ -35,7 +29,7 @@ class GuestModeManager:
         self._snapshot_store = Store(hass, 1, STORAGE_KEY_SNAPSHOT)
         self._state: str = MODE_OFF
         self._auto_disable_at: datetime | None = None
-        self._auto_disable_task: asyncio.Task | None = None
+        self._auto_disable_unsub: Callable[[], None] | None = None
 
     async def async_load(self) -> None:
         """Load persisted state."""
@@ -194,7 +188,14 @@ class GuestModeManager:
         return snapshot
 
     async def _disable_domain(self, domain: str, snapshot: dict[str, str]) -> None:
-        """Disable all entities in a snapshot."""
+        """Disable all entities in a snapshot.
+
+        Scenes have no concept of "off" — calling scene.turn_off is a no-op in HA,
+        so we only restore them on deactivate (re-applying the previous scene if any).
+        Automations and scripts both expose ``turn_off``.
+        """
+        if domain == "scene":
+            return
         for entity_id in snapshot:
             try:
                 await self.hass.services.async_call(
@@ -214,17 +215,31 @@ class GuestModeManager:
 
         restored_count = 0
         for domain, entities in data["entities"].items():
+            # Scenes are not turned off, so nothing to restore here.
+            if domain == "scene":
+                continue
             for entity_id, previous_state in entities.items():
+                # Map the recorded HA state back to a service call. We only restore
+                # entities that were ON before guest mode; anything that was already
+                # off/unavailable stays off (turn_off was a no-op for those).
                 if previous_state == "on":
-                    try:
-                        await self.hass.services.async_call(
-                            domain, "turn_on",
-                            {"entity_id": entity_id},
-                            blocking=False,
-                        )
-                        restored_count += 1
-                    except Exception as exc:
-                        _LOGGER.warning("Failed to restore %s: %s", entity_id, exc)
+                    service = "turn_on"
+                elif previous_state == "off":
+                    # Was already off — explicitly turn off in case something else
+                    # toggled it during guest mode.
+                    service = "turn_off"
+                else:
+                    # unavailable / unknown — skip
+                    continue
+                try:
+                    await self.hass.services.async_call(
+                        domain, service,
+                        {"entity_id": entity_id},
+                        blocking=False,
+                    )
+                    restored_count += 1
+                except Exception as exc:
+                    _LOGGER.warning("Failed to restore %s: %s", entity_id, exc)
 
         _LOGGER.info("Restored %d entities from snapshot", restored_count)
 
@@ -241,9 +256,11 @@ class GuestModeManager:
         Falls back to a set of sensible defaults if no overrides configured.
         """
         if overrides:
-            # User-configured safe states take priority
+            # User-configured safe states take priority. Copy each target so we
+            # don't mutate the caller's dict (which the previous code did via pop()).
             for entity_id, target in overrides.items():
                 domain = entity_id.split(".")[0]
+                target = dict(target)
                 target_state = target.pop("state", None)
                 if not target_state:
                     continue
@@ -297,7 +314,12 @@ class GuestModeManager:
         })
 
     async def _schedule_auto_disable(self) -> None:
-        """Schedule auto-disable via a delayed task."""
+        """Schedule auto-disable using HA's event loop scheduler.
+
+        ``async_call_later`` integrates with HA's clock and cancellation so the
+        timer survives event-loop quirks that a raw ``asyncio.sleep`` task
+        would not (e.g. it is properly torn down on stop).
+        """
         if self._auto_disable_at is None:
             return
 
@@ -309,19 +331,15 @@ class GuestModeManager:
             await self.async_deactivate()
             return
 
-        async def _auto_disable():
-            try:
-                await asyncio.sleep(delay)
-                _LOGGER.info("Auto-disable timer triggered — deactivating guest mode")
-                await self.async_deactivate()
-            except asyncio.CancelledError:
-                _LOGGER.debug("Auto-disable task cancelled")
-                raise
+        async def _auto_disable(_now: datetime) -> None:
+            self._auto_disable_unsub = None
+            _LOGGER.info("Auto-disable timer triggered — deactivating guest mode")
+            await self.async_deactivate()
 
-        self._auto_disable_task = asyncio.create_task(_auto_disable())
+        self._auto_disable_unsub = async_call_later(self.hass, delay, _auto_disable)
 
     async def _cancel_auto_disable(self) -> None:
         """Cancel pending auto-disable task."""
-        if self._auto_disable_task is not None:
-            self._auto_disable_task.cancel()
-            self._auto_disable_task = None
+        if self._auto_disable_unsub is not None:
+            self._auto_disable_unsub()
+            self._auto_disable_unsub = None
