@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import fnmatch
 import logging
 from typing import Any
 from datetime import datetime, timezone
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .const import *
@@ -151,11 +153,16 @@ class AuthProxyServer:
         self,
         hass: HomeAssistant,
         token_manager: TokenManager,
+        entry: ConfigEntry,
         port: int = DEFAULT_GUEST_PAGE_PORT,
-        host: str = "127.0.0.1",
+        host: str = "0.0.0.0",
     ) -> None:
+        # NOTE: we bind 0.0.0.0 by default because guests on phones on the
+        # LAN cannot reach 127.0.0.1. Operators should restrict access via
+        # firewall / reverse proxy. See README “Security” section.
         self.hass = hass
         self._token_manager = token_manager
+        self._entry = entry
         self._port = port
         self._host = host
         self._runner: Any = None
@@ -175,32 +182,56 @@ class AuthProxyServer:
         self._runner = web.AppRunner(app)
         await self._runner.setup()
         site = web.TCPSite(self._runner, self._host, self._port)
-        self._server = await site.start()
+        # web.TCPSite.start() returns None; the site itself is what we
+        # hold on to so we can stop it later.
+        await site.start()
+        self._site = site
 
-        # Build external URL template (token_id/secret filled in by caller)
-        ha_url = self.hass.config.external_url or f"http://{self._host}:{self._port}"
-        self.external_url = f"{ha_url}/gatekeeper/guest/TOKEN_ID/TOKEN_SECRET"
+        # Build the base URL used to construct absolute guest links. Prefer
+        # the HA external_url, fall back to internal_url, then to the
+        # bind host.
+        ha_url = (
+            self.hass.config.external_url
+            or self.hass.config.internal_url
+            or f"http://{self._host}:{self._port}"
+        )
+        self.external_url = ha_url.rstrip("/")
 
         _LOGGER.info("Gatekeeper guest proxy started on %s:%d", self._host, self._port)
 
+    def build_guest_url(self, token_id: str, token_secret: str) -> str:
+        """Return an absolute URL for a freshly created token."""
+        base = self.external_url or f"http://{self._host}:{self._port}"
+        return f"{base}/gatekeeper/guest/{token_id}/{token_secret}"
+
     async def async_stop(self, *args) -> None:
         """Stop the HTTP server and clean up the aiohttp app runner."""
-        if self._server:
-            self._server.close()
-            await self._server.wait_closed()
-            self._server = None
+        site = getattr(self, "_site", None)
+        if site is not None:
+            await site.stop()
+            self._site = None
         if self._runner:
             await self._runner.cleanup()
             self._runner = None
         _LOGGER.info("Gatekeeper guest proxy stopped")
 
-    async def _validate_request(self, request) -> dict[str, Any] | None:
-        """Validate token from URL path. Returns token dict or None."""
+    async def _validate_request(
+        self, request, *, count_use: bool = False
+    ) -> dict[str, Any] | None:
+        """Validate token from URL path. Returns token dict or None.
+
+        ``count_use`` controls whether the validation increments the token's
+        use_count. Page loads and read-only status calls should pass
+        ``count_use=False`` so refreshing the page doesn't burn through
+        max_uses; only successful control actions should increment.
+        """
         token_id = request.match_info.get("token_id")
         token_secret = request.match_info.get("token_secret")
         if not token_id or not token_secret:
             return None
-        return await self._token_manager.async_validate_token(token_id, token_secret)
+        return await self._token_manager.async_validate_token(
+            token_id, token_secret, count_use=count_use
+        )
 
     async def _handle_guest_page(self, request) -> "web.Response":
         """Serve the standalone guest page."""
@@ -235,10 +266,13 @@ class AuthProxyServer:
         if token is None:
             return web.json_response({"error": "Invalid token"}, status=401)
 
-        # Safely read config entry options
-        entry = self.hass.config_entries.async_get_entry(DOMAIN)
-        wifi_ssid = entry.options.get("wifi_ssid", "") if entry else ""
-        wifi_password = entry.options.get("wifi_password", "") if entry else ""
+        # Read config entry options directly from the entry we were given
+        # at construction time. (The old code called
+        # `config_entries.async_get_entry(DOMAIN)` which takes an entry_id,
+        # not a domain, and always returned None.)
+        options = self._entry.options if self._entry else {}
+        wifi_ssid = options.get("wifi_ssid", "")
+        wifi_password = options.get("wifi_password", "")
 
         return web.json_response({
             "active": True,
@@ -252,7 +286,8 @@ class AuthProxyServer:
         """Proxy a service call with scope validation."""
         from aiohttp import web
 
-        token = await self._validate_request(request)
+        # Only the action endpoint increments use_count.
+        token = await self._validate_request(request, count_use=True)
         if token is None:
             return web.json_response({"error": "Invalid token"}, status=401)
 
@@ -264,7 +299,16 @@ class AuthProxyServer:
         domain = body.get("domain", "")
         service = body.get("service", "")
         entity_id = body.get("entity_id", "")
-        service_data = body.get("data", {})
+        service_data = body.get("data", {}) or {}
+
+        if not isinstance(domain, str) or not domain:
+            return web.json_response({"error": "Missing or invalid domain"}, status=400)
+        if not isinstance(service, str) or not service:
+            return web.json_response({"error": "Missing or invalid service"}, status=400)
+        if not isinstance(entity_id, str) or not entity_id:
+            return web.json_response({"error": "Missing or invalid entity_id"}, status=400)
+        if not isinstance(service_data, dict):
+            return web.json_response({"error": "Invalid data"}, status=400)
 
         # Scope validation
         if not self._is_service_allowed(token, domain, service, entity_id):
@@ -295,15 +339,9 @@ class AuthProxyServer:
             if scoped_domains and domain not in scoped_domains:
                 continue
 
-            # Check entity glob scope
-            if scoped_entities:
-                in_scope = False
-                for pattern in scoped_entities:
-                    if entity_id.startswith(pattern.replace("*", "").rstrip(".")):
-                        in_scope = True
-                        break
-                if not in_scope:
-                    continue
+            # Check entity glob scope using proper glob semantics.
+            if scoped_entities and not _matches_any(entity_id, scoped_entities):
+                continue
 
             results.append({
                 "entity_id": entity_id,
@@ -326,17 +364,11 @@ class AuthProxyServer:
                 _LOGGER.warning("Guest tried %s — not in allowed services", service_key)
                 return False
 
-        # Check entity scope
+        # Check entity scope (proper glob semantics)
         scoped_entities = token.get("scoped_entities", [])
-        if scoped_entities:
-            in_scope = False
-            for pattern in scoped_entities:
-                if entity_id.startswith(pattern.replace("*", "").rstrip(".")):
-                    in_scope = True
-                    break
-            if not in_scope:
-                _LOGGER.warning("Guest tried %s — entity not in scope", entity_id)
-                return False
+        if scoped_entities and not _matches_any(entity_id, scoped_entities):
+            _LOGGER.warning("Guest tried %s — entity not in scope", entity_id)
+            return False
 
         # Check domain scope
         scoped_domains = set(token.get("scoped_domains", []))
@@ -347,17 +379,32 @@ class AuthProxyServer:
         return True
 
     @staticmethod
-    def _format_remaining(expires_at: str | None) -> str:
-        """Format remaining time as human-readable string."""
-        if not expires_at:
-            return "--"
-        try:
-            expires = datetime.fromisoformat(expires_at)
-            remaining = (expires - datetime.now(timezone.utc)).total_seconds()
-            if remaining <= 0:
-                return "Expired"
-            hours = int(remaining // 3600)
-            minutes = int((remaining % 3600) // 60)
-            return f"{hours}h {minutes}m"
-        except (ValueError, TypeError):
-            return "--"
+    def _format_remaining(expires_at: str | None) -> str:  # noqa: D401
+        return _format_remaining(expires_at)
+
+
+def _matches_any(entity_id: str, patterns: list[str]) -> bool:
+    """Return True if entity_id matches any of the given glob patterns.
+
+    Uses :func:`fnmatch.fnmatchcase` so the patterns are real globs with
+    anchored boundaries — ``light.*`` matches ``light.kitchen`` but NOT
+    ``light_sensor.foo`` or ``lightbulb.x``. A bare ``*`` still matches
+    everything (this is intentional and matches user intent).
+    """
+    return any(fnmatch.fnmatchcase(entity_id, p) for p in patterns)
+
+
+def _format_remaining(expires_at: str | None) -> str:
+    """Format remaining time as human-readable string."""
+    if not expires_at:
+        return "--"
+    try:
+        expires = datetime.fromisoformat(expires_at)
+        remaining = (expires - datetime.now(timezone.utc)).total_seconds()
+        if remaining <= 0:
+            return "Expired"
+        hours = int(remaining // 3600)
+        minutes = int((remaining % 3600) // 60)
+        return f"{hours}h {minutes}m"
+    except (ValueError, TypeError):
+        return "--"
