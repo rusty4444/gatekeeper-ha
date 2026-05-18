@@ -144,6 +144,8 @@ pytest tests/
 - Home Assistant 2025.8.0+
 - Python 3.12+
 
+This project was developed with the assistance of AI tools.
+
 ## License
 
 MIT
