@@ -157,6 +157,16 @@ class GatekeeperCard extends LitElement {
     navigator.clipboard.writeText(text).catch(() => {});
   }
 
+  _shareUrl(url) {
+    // Uses the platform's native share sheet (iOS/Android). The URL is the
+    // only thing shared — it stays on-device until the user picks a target.
+    if (navigator.share) {
+      navigator.share({ title: 'Guest access', url: url }).catch(() => {});
+    } else {
+      this._copyToClipboard(url);
+    }
+  }
+
   _formatExpiry(iso) {
     if (!iso) return '--';
     const expires = new Date(iso + 'Z');
@@ -224,16 +234,20 @@ class GatekeeperCard extends LitElement {
           ` : this._tokens.map(t => this._renderToken(t))}
         </div>
 
-        <!-- QR Code -->
-        ${this._config.show_qr && this._guestUrl ? html`
+        <!-- Guest link share -->
+        ${this._guestUrl ? html`
           <div class="section qr-section">
-            <h3>Guest Access QR</h3>
-            <p class="qr-hint">Share this code for guests to scan</p>
-            <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(this._guestUrl)}"
-                 alt="Guest access QR code" class="qr-code" />
+            <h3>Guest Access Link</h3>
+            <p class="qr-hint">
+              Send this link to your guest. A scannable QR code is rendered
+              locally once the card is built from source (see README).
+            </p>
             <div class="url-display">
               <input type="text" .value=${this._guestUrl} readonly />
               <ha-button @click=${() => this._copyToClipboard(this._guestUrl)}>Copy</ha-button>
+              ${navigator.share ? html`
+                <ha-button @click=${() => this._shareUrl(this._guestUrl)}>Share</ha-button>
+              ` : ''}
             </div>
           </div>
         ` : ''}
