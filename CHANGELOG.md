@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.3] — 2026-05-19
+
+### Fixed
+- Config flow 500 error on HA 2026.4+ (Python 3.14) — relaxed `bcrypt==4.2.1` to `bcrypt>=4.2.1,<6.0.0`
+
 ## [0.1.2] — 2026-05-19
 
 ### Security
