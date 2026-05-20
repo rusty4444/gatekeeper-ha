@@ -240,7 +240,7 @@ def _register_services(
 
     async def _handle_activate_mode(call: ServiceCall) -> dict[str, bool]:
         auto_disable = call.data.get(ATTR_AUTO_DISABLE_AFTER, 0)
-        disable_automations = call.data.get(ATTR_DISABLE_AUTOMATIONS, True)
+        disable_automations = call.data.get(ATTR_DISABLE_AUTOMATIONS, False)
         automation_ids = call.data.get(ATTR_AUTOMATION_ENTITY_IDS, None)
         set_safe_states = call.data.get(ATTR_SET_SAFE_STATES, True)
         disable_scripts = call.data.get(ATTR_DISABLE_SCRIPTS, True)
