@@ -85,7 +85,7 @@ activate_mode:
       name: Disable automations
       description: Whether to disable selected automations.
       required: false
-      default: true
+      default: false
       selector:
         boolean:
     automation_entity_ids:
