@@ -17,6 +17,10 @@ from .const import (
     DEFAULT_EXPIRY_HOURS,
     DEFAULT_GUEST_PAGE_PORT,
     DOMAIN,
+    OPT_DISABLE_AUTOMATIONS,
+    OPT_DISABLE_SCENES,
+    OPT_DISABLE_SCRIPTS,
+    OPT_SET_SAFE_STATES,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -110,16 +114,20 @@ class GatekeeperOptionsFlow(OptionsFlow):
                         default=current.get("default_guest_mode_duration_hours", 48),
                     ): vol.All(vol.Coerce(int), vol.Range(min=0, max=8760)),
                     vol.Optional(
+                        "disable_automations_on_mode",
+                        default=current.get(OPT_DISABLE_AUTOMATIONS, False),
+                    ): cv.boolean,
+                    vol.Optional(
                         "disable_scripts_on_mode",
-                        default=current.get("disable_scripts_on_mode", True),
+                        default=current.get(OPT_DISABLE_SCRIPTS, True),
                     ): cv.boolean,
                     vol.Optional(
                         "disable_scenes_on_mode",
-                        default=current.get("disable_scenes_on_mode", True),
+                        default=current.get(OPT_DISABLE_SCENES, True),
                     ): cv.boolean,
                     vol.Optional(
                         "apply_safe_states",
-                        default=current.get("apply_safe_states", True),
+                        default=current.get(OPT_SET_SAFE_STATES, True),
                     ): cv.boolean,
                     vol.Optional(
                         "wifi_ssid",

@@ -57,6 +57,10 @@ TOKEN_SOURCE_GUEST_MODE = "guest_mode"
 
 # Config option keys
 OPT_GUEST_PORT = "guest_port"
+OPT_DISABLE_AUTOMATIONS = "disable_automations_on_mode"
+OPT_DISABLE_SCRIPTS = "disable_scripts_on_mode"
+OPT_DISABLE_SCENES = "disable_scenes_on_mode"
+OPT_SET_SAFE_STATES = "apply_safe_states"
 OPT_WIFI_SSID = "wifi_ssid"
 OPT_WIFI_PASSWORD = "wifi_password"
 OPT_SHOW_WIFI = "show_wifi"  # global default for WiFi exposure (off by default)
@@ -115,6 +119,10 @@ __all__ = [
     "TOKEN_SOURCE_MANUAL",
     "TOKEN_SOURCE_GUEST_MODE",
     "OPT_GUEST_PORT",
+    "OPT_DISABLE_AUTOMATIONS",
+    "OPT_DISABLE_SCRIPTS",
+    "OPT_DISABLE_SCENES",
+    "OPT_SET_SAFE_STATES",
     "OPT_WIFI_SSID",
     "OPT_WIFI_PASSWORD",
     "OPT_SHOW_WIFI",

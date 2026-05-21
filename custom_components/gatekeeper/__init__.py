@@ -41,7 +41,11 @@ from .const import (
     EVENT_TOKEN_CREATED,
     EVENT_TOKEN_REVOKED,
     GATEKEEPER_CONFIG_VERSION,
+    OPT_DISABLE_AUTOMATIONS,
+    OPT_DISABLE_SCENES,
+    OPT_DISABLE_SCRIPTS,
     OPT_GUEST_PORT,
+    OPT_SET_SAFE_STATES,
     SERVICE_ACTIVATE_MODE,
     SERVICE_CREATE_TOKEN,
     SERVICE_DEACTIVATE_MODE,
@@ -239,12 +243,13 @@ def _register_services(
         return {"success": True}
 
     async def _handle_activate_mode(call: ServiceCall) -> dict[str, bool]:
+        opts = entry.options
         auto_disable = call.data.get(ATTR_AUTO_DISABLE_AFTER, 0)
-        disable_automations = call.data.get(ATTR_DISABLE_AUTOMATIONS, False)
+        disable_automations = call.data.get(ATTR_DISABLE_AUTOMATIONS, opts.get(OPT_DISABLE_AUTOMATIONS, False))
         automation_ids = call.data.get(ATTR_AUTOMATION_ENTITY_IDS, None)
-        set_safe_states = call.data.get(ATTR_SET_SAFE_STATES, True)
-        disable_scripts = call.data.get(ATTR_DISABLE_SCRIPTS, True)
-        disable_scenes = call.data.get(ATTR_DISABLE_SCENES, True)
+        set_safe_states = call.data.get(ATTR_SET_SAFE_STATES, opts.get(OPT_SET_SAFE_STATES, True))
+        disable_scripts = call.data.get(ATTR_DISABLE_SCRIPTS, opts.get(OPT_DISABLE_SCRIPTS, True))
+        disable_scenes = call.data.get(ATTR_DISABLE_SCENES, opts.get(OPT_DISABLE_SCENES, True))
         safe_state_overrides = call.data.get(ATTR_SAFE_STATE_OVERRIDES, None)
 
         await guest_mode.async_activate(
@@ -298,7 +303,7 @@ def _register_services(
         DOMAIN, SERVICE_ACTIVATE_MODE, _handle_activate_mode,
         schema=vol.Schema({
             vol.Optional(ATTR_AUTO_DISABLE_AFTER, default=0): vol.Coerce(int),
-            vol.Optional(ATTR_DISABLE_AUTOMATIONS, default=True): cv.boolean,
+            vol.Optional(ATTR_DISABLE_AUTOMATIONS, default=False): cv.boolean,
             vol.Optional(ATTR_AUTOMATION_ENTITY_IDS): vol.Any(cv.ensure_list, None),
             vol.Optional(ATTR_SET_SAFE_STATES, default=True): cv.boolean,
             vol.Optional(ATTR_DISABLE_SCRIPTS, default=True): cv.boolean,

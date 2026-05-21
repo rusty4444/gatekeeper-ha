@@ -25,6 +25,12 @@ blueprint:
           min: 1
           max: 8760
           unit_of_measurement: hours
+    disable_automations:
+      name: Disable automations
+      description: Disable automations when guest mode activates via this blueprint
+      default: true
+      selector:
+        boolean:
     notify_action:
       name: Notification action (optional)
       description: >
@@ -38,6 +44,7 @@ variables:
   lock_entity_var: !input lock_entity
   lock_code_var: !input lock_code
   auto_disable_hours_var: !input auto_disable_hours
+  disable_automations_var: !input disable_automations
 
 trigger:
   - platform: state
@@ -54,7 +61,7 @@ action:
   - service: gatekeeper.activate_mode
     data:
       auto_disable_after: "{{ auto_disable_hours_var }}"
-      disable_automations: true
+      disable_automations: "{{ disable_automations_var }}"
       set_safe_states: true
 
   - choose:

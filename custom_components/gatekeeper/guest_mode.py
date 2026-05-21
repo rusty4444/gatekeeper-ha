@@ -64,7 +64,7 @@ class GuestModeManager:
     async def async_activate(
         self,
         auto_disable_hours: float = 0,
-        disable_automations: bool = True,
+        disable_automations: bool = False,
         automation_entity_ids: list[str] | None = None,
         set_safe_states: bool = True,
         disable_scripts: bool = True,
@@ -158,7 +158,7 @@ class GuestModeManager:
 
     async def _snapshot_and_disable(
         self,
-        disable_automations: bool = True,
+        disable_automations: bool = False,
         automation_entity_ids: list[str] | None = None,
         disable_scripts: bool = True,
         disable_scenes: bool = True,

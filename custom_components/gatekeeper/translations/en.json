@@ -24,6 +24,7 @@
           "default_expiry_hours": "Default token expiry (hours)",
           "default_auto_disable_hours": "Auto-disable guest mode after (hours, 0=manual)",
           "default_guest_mode_duration_hours": "Default guest mode duration (hours, 0=manual)",
+          "disable_automations_on_mode": "Disable automations when guest mode activates",
           "disable_scripts_on_mode": "Disable scripts when guest mode activates",
           "disable_scenes_on_mode": "Disable scenes when guest mode activates",
           "apply_safe_states": "Apply safe states (lock doors, turn off switches) in guest mode",
