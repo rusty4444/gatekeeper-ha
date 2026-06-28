@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import pytest
 
 from custom_components.gatekeeper.auth_proxy import AuthProxyServer
+from custom_components.gatekeeper.const import OPT_PUBLIC_GUEST_BASE_URL
 from custom_components.gatekeeper.token_manager import TokenManager
 
 
@@ -41,6 +42,54 @@ def test_build_guest_url_uses_proxy_port(proxy):
     proxy.external_url = ""
     url = proxy.build_guest_url("gk_abc", "secret")
     assert url == "http://127.0.0.1:58921/gatekeeper/guest/gk_abc/secret"
+
+
+def test_external_url_default_uses_derived_host_and_proxy_port():
+    """Default links keep using the derived host with the guest proxy port."""
+    hass = SimpleNamespace(
+        config=SimpleNamespace(
+            external_url="https://homeassistant.local:8123",
+            internal_url=None,
+        )
+    )
+    entry = SimpleNamespace(entry_id="e1", options={})
+    proxy = AuthProxyServer(hass, SimpleNamespace(), entry, port=58921, host="127.0.0.1")
+
+    assert proxy._build_external_url() == "http://homeassistant.local:58921"
+
+
+def test_external_url_uses_public_guest_base_url():
+    """Configured public base URL is used exactly, without appending the port."""
+    hass = SimpleNamespace(
+        config=SimpleNamespace(
+            external_url="https://homeassistant.local:8123",
+            internal_url=None,
+        )
+    )
+    entry = SimpleNamespace(
+        entry_id="e1",
+        options={OPT_PUBLIC_GUEST_BASE_URL: "https://garage.example.com"},
+    )
+    proxy = AuthProxyServer(hass, SimpleNamespace(), entry, port=58921, host="127.0.0.1")
+
+    proxy.external_url = proxy._build_external_url()
+    assert proxy.external_url == "https://garage.example.com"
+    assert (
+        proxy.build_guest_url("gk_abc", "secret")
+        == "https://garage.example.com/gatekeeper/guest/gk_abc/secret"
+    )
+
+
+def test_external_url_strips_public_guest_base_url_trailing_slash():
+    """Trailing slashes in the configured public base URL are removed."""
+    hass = SimpleNamespace(config=SimpleNamespace(external_url=None, internal_url=None))
+    entry = SimpleNamespace(
+        entry_id="e1",
+        options={OPT_PUBLIC_GUEST_BASE_URL: "https://garage.example.com/"},
+    )
+    proxy = AuthProxyServer(hass, SimpleNamespace(), entry, port=58921, host="127.0.0.1")
+
+    assert proxy._build_external_url() == "https://garage.example.com"
 
 
 def test_check_browser_origin_same_origin_allowed(proxy):

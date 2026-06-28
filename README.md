@@ -75,6 +75,7 @@ All configuration is via the UI. Go to **Settings → Devices & Services → Gat
 | Option | Default | Description |
 |--------|---------|-------------|
 | Guest page port | 8921 | Port for the standalone guest web page |
+| Public guest base URL | empty | Public URL used for generated guest links and QR codes when the guest page is behind a reverse proxy or Cloudflare Tunnel. Leave empty for automatic local URL generation. |
 | Default token expiry | 24h | Default hours for new guest tokens |
 | Auto-disable after | 48h | Auto-disable guest mode after N hours (0 = manual) |
 
@@ -125,8 +126,17 @@ The guest page is served by a lightweight HTTP server embedded in the integratio
 **If you run HA behind a reverse proxy** (Nginx, Caddy, Traefik, etc.) and only want the guest page accessible through that proxy:
 
 1. Set the guest port to a high local-only port (e.g. 58921) in **Settings → Devices & Services → Gatekeeper HA → Configure**
-2. Add a location block in your proxy config pointing to `http://127.0.0.1:58921`
-3. Restrict with your proxy's usual auth / IP allowlist rules
+2. Set **Public guest base URL** to the external URL guests will open, such as `https://garage.example.com`
+3. Add a location block or tunnel route in your proxy config pointing to the guest server, such as `http://127.0.0.1:58921`
+4. Restrict with your proxy's usual auth / IP allowlist rules
+
+For a Cloudflare Tunnel setup:
+
+| Setting | Example |
+|---------|---------|
+| Public guest base URL | `https://garage.example.com` |
+| Cloudflare route | `https://garage.example.com` → `http://homeassistant.local:8921` |
+| Generated link | `https://garage.example.com/gatekeeper/guest/<token_id>/<secret>` |
 
 The bind host can also be changed to `127.0.0.1` via [the options flow](#configuration) if you do not want it exposed on the LAN directly.
 
