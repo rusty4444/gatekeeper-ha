@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.6] — 2026-07-09
+
+### Added
+- Configurable public guest base URL for deployments where the externally reachable URL differs from Home Assistant's internal URL.
+
+### Fixed
+- Manifest version now matches the next GitHub/HACS release after the v0.1.5 release series.
+
 ## [0.1.3] — 2026-05-19
 
 ### Fixed
