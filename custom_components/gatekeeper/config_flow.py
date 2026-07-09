@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+from urllib.parse import urlparse
 
 import voluptuous as vol
 
@@ -20,6 +21,7 @@ from .const import (
     OPT_DISABLE_AUTOMATIONS,
     OPT_DISABLE_SCENES,
     OPT_DISABLE_SCRIPTS,
+    OPT_PUBLIC_GUEST_BASE_URL,
     OPT_SET_SAFE_STATES,
 )
 
@@ -35,6 +37,38 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         ),
     }
 )
+
+
+def _normalize_public_guest_base_url(value: Any) -> str:
+    """Validate and normalize the public guest base URL option."""
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise vol.Invalid("invalid_url")
+
+    value = value.strip()
+    if not value:
+        return ""
+
+    try:
+        parsed = urlparse(value)
+        hostname = parsed.hostname
+        _ = parsed.port
+    except ValueError as err:
+        raise vol.Invalid("invalid_url") from err
+
+    if (
+        parsed.scheme.lower() not in ("http", "https")
+        or not parsed.netloc
+        or not hostname
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+        or any(char.isspace() for char in value)
+    ):
+        raise vol.Invalid("invalid_url")
+
+    return value.rstrip("/")
 
 
 class GatekeeperConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -88,8 +122,17 @@ class GatekeeperOptionsFlow(OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Manage the options."""
+        errors: dict[str, str] = {}
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            options = {**user_input}
+            try:
+                options[OPT_PUBLIC_GUEST_BASE_URL] = _normalize_public_guest_base_url(
+                    options.get(OPT_PUBLIC_GUEST_BASE_URL, "")
+                )
+            except vol.Invalid:
+                errors[OPT_PUBLIC_GUEST_BASE_URL] = "invalid_url"
+            else:
+                return self.async_create_entry(title="", data=options)
 
         current = self.config_entry.options
 
@@ -101,6 +144,10 @@ class GatekeeperOptionsFlow(OptionsFlow):
                         "guest_port",
                         default=current.get("guest_port", DEFAULT_GUEST_PAGE_PORT),
                     ): vol.All(vol.Coerce(int), vol.Range(min=1024, max=65535)),
+                    vol.Optional(
+                        OPT_PUBLIC_GUEST_BASE_URL,
+                        default=current.get(OPT_PUBLIC_GUEST_BASE_URL, ""),
+                    ): _normalize_public_guest_base_url,
                     vol.Optional(
                         "default_expiry_hours",
                         default=current.get("default_expiry_hours", DEFAULT_EXPIRY_HOURS),
@@ -143,5 +190,6 @@ class GatekeeperOptionsFlow(OptionsFlow):
                     ): cv.boolean,
                 }
             ),
+            errors=errors,
             last_step=True,
         )

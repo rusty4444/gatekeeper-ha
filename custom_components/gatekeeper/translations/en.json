@@ -15,12 +15,16 @@
     }
   },
   "options": {
+    "error": {
+      "invalid_url": "Enter a valid HTTP or HTTPS URL."
+    },
     "step": {
       "init": {
         "title": "Gatekeeper HA Options",
         "description": "Configure Gatekeeper HA behavior.",
         "data": {
           "guest_port": "Guest page port (1024-65535)",
+          "public_guest_base_url": "Public guest base URL (optional)",
           "default_expiry_hours": "Default token expiry (hours)",
           "default_auto_disable_hours": "Auto-disable guest mode after (hours, 0=manual)",
           "default_guest_mode_duration_hours": "Default guest mode duration (hours, 0=manual)",
@@ -30,6 +34,9 @@
           "apply_safe_states": "Apply safe states (lock doors, turn off switches) in guest mode",
           "wifi_ssid": "WiFi network name (shown on guest page)",
           "wifi_password": "WiFi password (shown on guest page)"
+        },
+        "data_description": {
+          "public_guest_base_url": "Public base URL used for generated guest links and QR codes when Gatekeeper is behind a reverse proxy or Cloudflare Tunnel. Leave empty for automatic local URL."
         }
       }
     }

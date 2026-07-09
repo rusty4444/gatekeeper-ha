@@ -15,6 +15,7 @@ from homeassistant.core import HomeAssistant
 from .const import (
     DEFAULT_GUEST_PAGE_PORT,
     OPT_GUEST_PORT,
+    OPT_PUBLIC_GUEST_BASE_URL,
     OPT_SHOW_WIFI,
     OPT_WIFI_PASSWORD,
     OPT_WIFI_SSID,
@@ -257,13 +258,25 @@ class AuthProxyServer:
         await site.start()
         self._site = site
 
-        # Build the base URL for absolute guest links. The guest page lives
-        # on the proxy's own port — NOT the HA frontend's. HA's
-        # external_url/internal_url point at 8123 (or whatever the user has
-        # configured for the UI), so reusing them produces links that 404.
-        # If the user has a reverse proxy in front of the guest page they
-        # should configure it to forward the host+path; the host name from
-        # internal_url is reused but the port comes from the proxy.
+        self.external_url = self._build_external_url()
+
+        _LOGGER.info(
+            "Gatekeeper guest proxy started on %s:%d (external URL: %s)",
+            self._host, self._port, self.external_url,
+        )
+
+    def _build_external_url(self) -> str:
+        """Build the base URL for absolute guest links."""
+        options = self._entry.options if self._entry else {}
+        public_base_url = str(options.get(OPT_PUBLIC_GUEST_BASE_URL, "") or "").strip()
+        if public_base_url:
+            return public_base_url.rstrip("/")
+
+        # The guest page lives on the proxy's own port — NOT the HA
+        # frontend's. HA's external_url/internal_url point at 8123 (or
+        # whatever the user has configured for the UI), so reusing them
+        # produces links that 404. We reuse the host name but keep the proxy
+        # port.
         host = self._host
         for candidate in (
             self.hass.config.external_url,
@@ -279,19 +292,14 @@ class AuthProxyServer:
             except (ValueError, TypeError):
                 continue
         scheme = "http"
-        self.external_url = f"{scheme}://{host}:{self._port}".rstrip("/")
-
-        _LOGGER.info(
-            "Gatekeeper guest proxy started on %s:%d (external URL: %s)",
-            self._host, self._port, self.external_url,
-        )
+        return f"{scheme}://{host}:{self._port}".rstrip("/")
 
     def build_guest_url(self, token_id: str, token_secret: str) -> str:
         """Return an absolute URL for a freshly created token.
 
         The URL always targets the guest-page port, never the HA UI port.
         """
-        base = self.external_url or f"http://{self._host}:{self._port}"
+        base = (self.external_url or f"http://{self._host}:{self._port}").rstrip("/")
         return f"{base}/gatekeeper/guest/{token_id}/{token_secret}"
 
     async def async_stop(self, *args) -> None:
