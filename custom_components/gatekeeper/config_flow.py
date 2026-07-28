@@ -147,7 +147,7 @@ class GatekeeperOptionsFlow(OptionsFlow):
                     vol.Optional(
                         OPT_PUBLIC_GUEST_BASE_URL,
                         default=current.get(OPT_PUBLIC_GUEST_BASE_URL, ""),
-                    ): _normalize_public_guest_base_url,
+                    ): str,
                     vol.Optional(
                         "default_expiry_hours",
                         default=current.get("default_expiry_hours", DEFAULT_EXPIRY_HOURS),
